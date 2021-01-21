@@ -54,7 +54,7 @@ class RevisedSimplexAlgorithm:
                 self.etas = []
             eta = np.identity(self.n)
             eta[:, leave_idx] = d
-            if np.min(np.diag(eta)) < self.epsilon:
+            if np.min(np.abs(np.diag(eta))) < self.epsilon:
                 z[enter_idx] = 0
 
         return True, enter_idx, leave_idx, t, d, eta if use_eta else None
@@ -86,7 +86,7 @@ class RevisedSimplexAlgorithm:
             z = self.c_n - y @ self.A_n
 
             eta = np.zeros(self.n)
-            while np.min(np.diag(eta)) < self.epsilon:
+            while np.min(np.abs(np.diag(eta))) < self.epsilon:
                 found, enter_idx, leave_idx, t, d, eta = self.calc_enter_and_leave(B_inv, z, use_eta)
                 if not found:
                     return
