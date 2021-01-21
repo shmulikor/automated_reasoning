@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.linalg import lu, solve_triangular
+from scipy.optimize import linprog
+
 
 class RevisedSimplexAlgorithm:
     BLAND = "bland"
@@ -143,7 +145,6 @@ if __name__ == '__main__':
     c = np.array([19, 13, 12, 17, 0, 0, 0])
 
     # print scipy-solver results
-    from scipy.optimize import linprog
     res = linprog(c=-c, A_ub=A, b_ub=b)
     print(res)
 
