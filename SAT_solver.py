@@ -75,8 +75,8 @@ class Assignments:
         for i, clause in enumerate(self.cnf):
             self.watch_literals.append([])
             lit_set = set(clause)
-            if len(lit_set) == 1:
-                self.watch_literals[i] = [lit_set.pop()]
+            if len(lit_set) <= 2:
+                self.watch_literals[i] = list(lit_set)
             else:
                 self.watch_literals[i] = [lit_set.pop(), lit_set.pop()]
 
@@ -102,7 +102,8 @@ class Assignments:
         # Performs BCP until saturation, returns True iff formula has a falsified clause
         changed = True
         if USE_WATCH_LIT and len(self.splits) > 0:
-            bcp_candidates = self.get_bcp_candidates(self.splits[-1])
+            bcp_candidates = self.get_bcp_candidates(self.splits[-1] * (1 if self.var_assignment[self.splits[-1]]
+            else -1))
         else:
             bcp_candidates = self.cnf
 
@@ -151,18 +152,19 @@ class Assignments:
         assert (var > 0)  # TODO maybe erase after debugging
         self.splits.append(var)
         self.var_assignment[var] = assign
-        self.decision_levels[var] = self.current_decision_level
         self.current_decision_level += 1
+        self.decision_levels[var] = self.current_decision_level
 
         involved_indices = [i for i, clause in enumerate(self.cnf) if var in self.cnf[i] or -var in self.cnf[i]]
         # Update watch literals for every clause with decided literal
-        self.update_watch_literals(involved_indices)
+        self.update_watch_literals(involved_indices) # TODO, maybe create another list of relevant indices
         # Update assigned clauses
         for i in involved_indices:
             if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
                 self.assigned_clauses[i] = True
 
     def perform_backjump(self, level):
+        assert(level >= 0)
         # Performs non-chronological backjump to a specified decision level
         self.splits = self.splits[:level]
         self.current_decision_level = level
@@ -182,7 +184,7 @@ class Assignments:
         return [], 2
 
     def solve(self):
-        while len(self.assigned_clauses) < len(self.cnf):  # TODO consider better condition
+        while not all(self.assigned_clauses) and not self.has_false_clause():  # TODO consider better condition
             has_conflict = self.bcp()
             if not has_conflict:
                 self.decide_next()
@@ -201,23 +203,15 @@ class Assignments:
 
 def dlis(formula, var_assignment, assigned_clauses):
     appearances_dict = defaultdict(int)
-    pos_appearances = defaultdict(int)  # DLIS also returns a recommendation for assignment
-    neg_appearances = defaultdict(int)
     # Count all appearances of non assigned variables in non assigned clauses (as negated and atomic vars)
     # Return the variable with most appearances, and the assignment that will help satisfying all clauses
-    # TODO - maybe act differently - consider each literal by its own and not its abs
-    # TODO - meaning we should take max from both neg and pos appearances
     for i, clause in enumerate(formula):
         if not assigned_clauses[i]:
             for literal in clause:
                 if abs(literal) not in var_assignment.keys():
-                    appearances_dict[abs(literal)] += 1
-                    if literal < 0:
-                        neg_appearances[abs(literal)] += 1
-                    else:
-                        pos_appearances[abs(literal)] += 1
+                    appearances_dict[literal] += 1
     chosen_literal = max(appearances_dict, key=lambda k: appearances_dict[k])
-    return chosen_literal, pos_appearances[chosen_literal] > neg_appearances[chosen_literal]
+    return abs(chosen_literal), chosen_literal > 0
 
 
 if __name__ == '__main__':
