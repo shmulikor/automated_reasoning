@@ -190,13 +190,13 @@ class Assignments:
             else:
                 learned_clause, bj_level = self.analyze_conflict()
                 if bj_level < 0:  # TODO convention for 0-level conflicts, meaning formula is UNSAT
-                    return False
+                    return False, []
                 self.cnf.append(learned_clause)
                 self.assigned_clauses.append(False)
                 self.watch_literals.append([])
                 self.update_watch_literals([-1])
                 self.perform_backjump(bj_level)
-        return True
+        return True, self.var_assignment
 
 
 def dlis(formula, var_assignment, assigned_clauses):
