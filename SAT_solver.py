@@ -1,8 +1,9 @@
 import numpy as np
 from collections import defaultdict
 from boolean_operators import And, Or, Not, Imp, Equiv, Atomic
-
-USE_WATCH_LIT = False
+import networkx  as nx
+import matplotlib.pyplot as plt
+import copy
 
 
 # A class responsible for converting a general formula to CNF
@@ -58,6 +59,8 @@ class FormulaToCNF:
         self.cnf = self.preprocessing()
 
 
+
+
 class Assignments:
     def __init__(self, cnf):
         self.cnf = cnf
@@ -66,6 +69,7 @@ class Assignments:
         self.decision_levels = {}
         self.splits = []
         self.current_decision_level = 0
+        self.bcp_implications = {}  # Used for implications graph. Keys are literals, values are clauses implied from
         self.init_watch_literals()
 
     def init_watch_literals(self):
@@ -101,14 +105,14 @@ class Assignments:
     def bcp(self):
         # Performs BCP until saturation, returns True iff formula has a falsified clause
         changed = True
-        if USE_WATCH_LIT and len(self.splits) > 0:
+        if len(self.splits) > 0:
             bcp_candidates = self.get_bcp_candidates(self.splits[-1] * (1 if self.var_assignment[self.splits[-1]]
             else -1))
         else:
             bcp_candidates = self.cnf
-
         while changed:
             changed = False
+
             for i, clause in enumerate(bcp_candidates):
                 if not self.assigned_clauses[i]:
                     if all([abs(l) in self.var_assignment.keys() for l in clause]):
@@ -124,37 +128,42 @@ class Assignments:
                                 self.var_assignment[abs(chosen_var)] = True if chosen_var > 0 else False
                                 self.assigned_clauses[i] = True
                                 self.decision_levels[abs(chosen_var)] = self.current_decision_level
+                                self.bcp_implications[abs(chosen_var)] = i
                                 changed = True
                                 involved_indices = [j for j, clause in enumerate(self.cnf) if
                                                     chosen_var in self.cnf[j] or -chosen_var in self.cnf[j]]
                                 bcp_candidates = self.get_bcp_candidates(chosen_var) # TODO review carefully - should
                                 # first choose candidates and then update or other way around?
                                 self.update_watch_literals(involved_indices)
-        return self.has_false_clause()  # TODO lec2 p39
+                                for i in involved_indices: # TODO optimize
+                                    if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
+                                        self.assigned_clauses[i] = True
+        return self.has_false_clause()
 
     def has_false_clause(self):
         # returns true iff the formula has a falsified clause
         for clause in self.cnf:
             # Counts the number of literals assigned to false
-            false_literals = [l for l in clause if ((l < 0 and abs(l) in self.var_assignment.keys() and
+            if self.false_literals_in_clause(clause) == len(clause):
+                return True
+        return False
+
+    def false_literals_in_clause(self, clause):
+        return len([l for l in clause if ((l < 0 and abs(l) in self.var_assignment.keys() and
                                                      self.var_assignment[abs(l)])
                                                     or
                                                     (l > 0 and l in self.var_assignment.keys() and
-                                                     not self.var_assignment[l]))]
-            if len(false_literals) == len(clause):
-                return False
-        return True
+                                                     not self.var_assignment[l]))])
 
     def decide_next(self):
         # Splits cases by using DLIS heuristic, and updates all relevant fields
         # to support non-chronological backjumps
-        var, assign = dlis(self, self.var_assignment, self.assigned_clauses)
+        var, assign = dlis(self.cnf, self.var_assignment, self.assigned_clauses)
         assert (var > 0)  # TODO maybe erase after debugging
         self.splits.append(var)
         self.var_assignment[var] = assign
         self.current_decision_level += 1
         self.decision_levels[var] = self.current_decision_level
-
         involved_indices = [i for i, clause in enumerate(self.cnf) if var in self.cnf[i] or -var in self.cnf[i]]
         # Update watch literals for every clause with decided literal
         self.update_watch_literals(involved_indices) # TODO, maybe create another list of relevant indices
@@ -168,7 +177,8 @@ class Assignments:
         # Performs non-chronological backjump to a specified decision level
         self.splits = self.splits[:level]
         self.current_decision_level = level
-        for var in self.decision_levels.keys():
+        copy_dict = copy.deepcopy(self.decision_levels)
+        for var in copy_dict.keys():
             if self.decision_levels[var] > level:
                 self.decision_levels.pop(var)
                 self.var_assignment.pop(var)
@@ -178,20 +188,56 @@ class Assignments:
             if has_assigned:
                 if any([abs(l) not in self.var_assignment.keys() for l in self.cnf[i]]):
                     self.assigned_clauses[i] = False
+        # TODO delete relevant implications
+
+    def create_implications_graph(self):
+        imp_graph = nx.DiGraph()
+        imp_graph.add_node(0) # Conflict node numbered as 0
+        newly_added = set()
+        # Add nodes for all falsified clauses
+        for i, clause in enumerate(self.cnf):
+            if self.assigned_clauses[i]: # Check for assigned clauses only
+                if self.false_literals_in_clause(clause) == len(clause): # TODO maybe just one conflict?
+                    for literal in clause:
+                        imp_graph.add_node(-literal)
+                        imp_graph.add_edge(-literal, 0, weight=i)
+                        newly_added.add(literal)
+        # Repeat until convergence using implications and decision levels (root nodes)
+        # 0 level bcp should also be roots as well
+        while len(newly_added) > 0:
+            update = set()
+            for var in newly_added:
+                if var in self.bcp_implications.keys():
+                    clause = self.cnf[self.bcp_implications[var]]
+                    lit = var if self.var_assignment[var] else -var
+                    for implier in clause:
+                        if(abs(implier) != var):
+                            imp_graph.add_node(-implier)
+                            imp_graph.add_edge(-implier, lit, weight=self.bcp_implications[var])
+                            update.add(abs(implier))
+            newly_added = update
+
+        nx.draw_networkx(imp_graph)
+        print(self.var_assignment)
+        plt.show()
+        assert(nx.algorithms.is_directed_acyclic_graph(imp_graph))
+        return imp_graph
 
     def analyze_conflict(self):
         # Creates implications graph and decides using UIP the backjump level and the learned clause
-        return [], 2
+        imp_graph = self.create_implications_graph()
+        return [-2], 1
 
     def solve(self):
-        while not all(self.assigned_clauses) and not self.has_false_clause():  # TODO consider better condition
+        while (not all(self.assigned_clauses)) or self.has_false_clause():  # TODO consider better condition
             has_conflict = self.bcp()
+
             if not has_conflict:
                 self.decide_next()
                 # TODO - should we check again for false clauses and backjump, or could it lead to infinite loop?
             else:
                 learned_clause, bj_level = self.analyze_conflict()
-                if bj_level < 0:  # TODO convention for 0-level conflicts, meaning formula is UNSAT
+                if bj_level < 0:  # 0 Level conflict
                     return False, []
                 self.cnf.append(learned_clause)
                 self.assigned_clauses.append(False)
@@ -223,6 +269,6 @@ if __name__ == '__main__':
     print(cnf)
     a = Assignments(cnf)
     print(a.watch_literals)
-    a.bcp()
     print(a.var_assignment, a.assigned_clauses)
     print(a.watch_literals)
+    print(a.solve())
