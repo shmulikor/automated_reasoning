@@ -55,11 +55,13 @@ class Assignments:
     def bcp(self):
         # Performs BCP until saturation, returns True iff formula has a falsified clause
         changed = True
-        if len(self.splits) > 0:
-            bcp_candidates = self.get_bcp_candidates(self.splits[-1] if self.var_assignment[self.splits[-1]]
-                                                     else -self.splits[-1])
-        else:
-            bcp_candidates = self.cnf
+        # TODO change back
+        # if len(self.splits) > 0:
+        #     bcp_candidates = self.get_bcp_candidates(self.splits[-1] if self.var_assignment[self.splits[-1]]
+        #                                              else -self.splits[-1])
+        # else:
+        bcp_candidates = self.cnf
+
         while changed:
             changed = False
 
@@ -121,6 +123,7 @@ class Assignments:
         # Update watch literals for every clause with decided literal
         self.update_watch_literals(involved_indices)  # TODO, maybe create another list of relevant indices
         # Update assigned clauses
+        involved_indices = [i for i, clause in enumerate(self.cnf) if var in self.cnf[i] or -var in self.cnf[i]]
         for i in involved_indices:
             if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
                 self.assigned_clauses[i] = True
@@ -173,7 +176,7 @@ class Assignments:
         nx.draw_networkx(imp_graph)
         print(self.var_assignment)
         print("splits is: ", self.splits)
-        plt.show()
+        #plt.show()
         assert (nx.algorithms.is_directed_acyclic_graph(imp_graph))
         return imp_graph
 
@@ -187,8 +190,10 @@ class Assignments:
         cc_decision_levels = []
         for lit in conflict_clause:
             cc_decision_levels.append(self.decision_levels[abs(lit)])
+        cc_decision_levels = list(set(cc_decision_levels))
         cc_decision_levels.sort()
         jump_level = cc_decision_levels[-2] if len(cc_decision_levels) > 1 else 0
+        print("jump to level: ", jump_level)
         return conflict_clause, jump_level
 
     def find_first_UIP(self, imp_graph):
@@ -277,6 +282,7 @@ def dlis(formula, var_assignment, assigned_clauses):
                 if abs(literal) not in var_assignment.keys():
                     appearances_dict[literal] += 1
     chosen_literal = max(appearances_dict, key=lambda k: appearances_dict[k])
+    print("appearances_dict ", appearances_dict)
     return abs(chosen_literal), chosen_literal > 0
 
 
@@ -308,6 +314,7 @@ if __name__ == '__main__':
         if len(line) > 0:
             cnf.append([int(num) for num in line.split()])
     print(cnf)
+
     a = Assignments(cnf)
     # print(a.watch_literals)
     # print(a.var_assignment, a.assigned_clauses)
