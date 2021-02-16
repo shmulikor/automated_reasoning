@@ -1,13 +1,14 @@
-import numpy as np
 from collections import defaultdict
 from boolean_operators import *
 import networkx as nx
 import matplotlib.pyplot as plt
+import os
 
 CONFLICT_NODE = 0
 
 
-# TODO make imp garph and UIP fields
+# Assumption - var numbers are given in continuous manner
+
 
 class Assignments:
     def __init__(self, cnf):
@@ -50,22 +51,25 @@ class Assignments:
         # Returns sublist of all clauses which include the negation of the literal as a watch literal
         # As stated in class, these are only ones relevant for BCP after assignment
         indices = [i for i, watchers in enumerate(self.watch_literals) if -literal in watchers]
+        indices.extend([i for i, watchers in enumerate(self.watch_literals) if len(watchers) == 1])
         return [self.cnf[j] for j in indices]
 
     def bcp(self):
         # Performs BCP until saturation, returns True iff formula has a falsified clause
         changed = True
-        # TODO change back
-        # if len(self.splits) > 0:
-        #     bcp_candidates = self.get_bcp_candidates(self.splits[-1] if self.var_assignment[self.splits[-1]]
-        #                                              else -self.splits[-1])
-        # else:
-        bcp_candidates = self.cnf
-
+        if len(self.splits) > 0:
+            last = self.splits[-1]
+            bcp_candidates = self.get_bcp_candidates(last if self.var_assignment[last] else -last)
+            involved_indices = [i for i, clause in enumerate(self.cnf) if last in self.cnf[i] or -last in self.cnf[i]]
+            # Update watch literals for every clause with decided literal
+            self.update_watch_literals(involved_indices)
+        else:
+            bcp_candidates = self.cnf
         while changed:
             changed = False
-
-            for i, clause in enumerate(bcp_candidates):
+            next_candidates = []
+            for clause in bcp_candidates:
+                i = self.cnf.index(clause)
                 if not self.assigned_clauses[i]:
                     if all([abs(l) in self.var_assignment.keys() for l in clause]):
                         self.assigned_clauses[i] = True
@@ -76,20 +80,25 @@ class Assignments:
                             past_assignments = [self.var_assignment[l] for l in assigned if l > 0] \
                                                + [not self.var_assignment[-l] for l in assigned if l < 0]
                             if not any(past_assignments):
-                                chosen_var = unassigned[0]
-                                self.var_assignment[abs(chosen_var)] = True if chosen_var > 0 else False
-                                self.assigned_clauses[i] = True
-                                self.decision_levels[abs(chosen_var)] = self.current_decision_level
-                                self.bcp_implications[abs(chosen_var)] = (i, self.current_decision_level)
+                                next_candidates.extend(self.bcp_updates(clause, unassigned[0]))
                                 changed = True
-                                involved_indices = [j for j, clause in enumerate(self.cnf) if
-                                                    chosen_var in self.cnf[j] or -chosen_var in self.cnf[j]]
-                                bcp_candidates = self.get_bcp_candidates(chosen_var)
-                                self.update_watch_literals(involved_indices)
-                                for i in involved_indices:
-                                    if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
-                                        self.assigned_clauses[i] = True
+            bcp_candidates = next_candidates
         return self.has_false_clause()
+
+    def bcp_updates(self, clause, chosen_var):
+        i = self.cnf.index(clause)
+        self.var_assignment[abs(chosen_var)] = True if chosen_var > 0 else False
+        self.assigned_clauses[i] = True
+        self.decision_levels[abs(chosen_var)] = self.current_decision_level
+        self.bcp_implications[abs(chosen_var)] = (i, self.current_decision_level)
+        involved_indices = [j for j, clause in enumerate(self.cnf) if
+                            chosen_var in self.cnf[j] or -chosen_var in self.cnf[j]]
+        bcp_candidates = self.get_bcp_candidates(chosen_var)
+        self.update_watch_literals(involved_indices)
+        for i in involved_indices:
+            if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
+                self.assigned_clauses[i] = True
+        return bcp_candidates
 
     def has_false_clause(self):
         # returns true iff the formula has a falsified clause
@@ -113,16 +122,11 @@ class Assignments:
             return
 
         var, assign = dlis(self.cnf, self.var_assignment, self.assigned_clauses)
-        print("dlis decided to put ", assign, "in var: ", var)
         assert (var > 0)
         self.splits.append(var)
         self.var_assignment[var] = assign
         self.current_decision_level += 1
         self.decision_levels[var] = self.current_decision_level
-        involved_indices = [i for i, clause in enumerate(self.cnf) if var in self.cnf[i] or -var in self.cnf[i]]
-        # Update watch literals for every clause with decided literal
-        self.update_watch_literals(involved_indices)  # TODO, maybe create another list of relevant indices
-        # Update assigned clauses
         involved_indices = [i for i, clause in enumerate(self.cnf) if var in self.cnf[i] or -var in self.cnf[i]]
         for i in involved_indices:
             if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
@@ -168,15 +172,13 @@ class Assignments:
                     clause = self.cnf[self.bcp_implications[var][0]]
                     lit = var if self.var_assignment[var] else -var
                     for implier in clause:
-                        if (abs(implier) != var):
+                        if abs(implier) != var:
                             imp_graph.add_node(-implier)
                             imp_graph.add_edge(-implier, lit, weight=self.bcp_implications[var][0])
                             update.add(abs(implier))
             newly_added = update
-        nx.draw_networkx(imp_graph)
-        print(self.var_assignment)
-        print("splits is: ", self.splits)
-        #plt.show()
+        # nx.draw_networkx(imp_graph, pos=nx.planar_layout(imp_graph))
+        # plt.show()
         assert (nx.algorithms.is_directed_acyclic_graph(imp_graph))
         return imp_graph
 
@@ -193,21 +195,10 @@ class Assignments:
         cc_decision_levels = list(set(cc_decision_levels))
         cc_decision_levels.sort()
         jump_level = cc_decision_levels[-2] if len(cc_decision_levels) > 1 else 0
-        print("jump to level: ", jump_level)
         return conflict_clause, jump_level
 
     def find_first_UIP(self, imp_graph):
         # Returns the last decision point in the graph
-        # TODO maybe we should assert it is the last decision?
-        # current_decision = CONFLICT_NODE
-        #
-        # for decision in reversed(self.splits):
-        #     assert (decision in self.var_assignment.keys())
-        #     lit = decision if self.var_assignment[decision] else -decision
-        #     if imp_graph.__contains__(lit):
-        #         current_decision = lit
-        #         break
-        # assert (current_decision != CONFLICT_NODE)
         current_decision = self.splits[-1]
         current_decision = current_decision if self.var_assignment[current_decision] else -current_decision
         assert (imp_graph.__contains__(current_decision))
@@ -231,45 +222,53 @@ class Assignments:
             if temp_distance < distance:
                 distance = temp_distance
                 first_UIP = node
-        print("First UIP is : ", first_UIP)  # TODO remove
         return first_UIP
 
     def learn_clause(self, imp_graph, FUIP):
         cur_clause = self.cnf[self.cur_conflict_clause]
-        while (-FUIP not in cur_clause):
+
+        while (-FUIP not in cur_clause) or \
+                self.decision_level_literals_num(self.decision_levels[abs(FUIP)], cur_clause) > 1:
             max_level = -1
-            last_lit = 0
             for lit in cur_clause:
                 if self.decision_levels[abs(lit)] > max_level:
                     max_level = self.decision_levels[abs(lit)]
-                    last_lit = lit
-            in_edges = imp_graph.in_edges([last_lit], True)
+
+            max_level_literals = [-literal for literal in cur_clause if self.decision_levels[abs(literal)] == max_level
+                                  and literal != -FUIP]
+            for literal in max_level_literals:
+                in_edges = list(imp_graph.in_edges([literal], True))
+                if (len(in_edges) > 0):
+                    break
             incoming_clause_index = in_edges[0][2]['weight']
             cur_clause = boolean_res(self.cnf[incoming_clause_index], cur_clause)
             assert (cur_clause is not None)
-        print('Learned clause is:', cur_clause)
         return cur_clause
 
     def solve(self):
-        while len(self.var_assignment.keys()) != self.variables_num or self.has_false_clause():  # TODO consider
-        # better condition
+        while (not all(self.assigned_clauses)) and (len(self.var_assignment.keys()) != self.variables_num or
+                                                    self.has_false_clause()):
             has_conflict = self.bcp()
             if not has_conflict:
-                print("Current assignment: ", self.var_assignment)
-                print("Assigned Clauses: ", self.assigned_clauses)
-                print(self.has_false_clause())
                 self.decide_next()
             else:
                 if self.current_decision_level == 0:
                     return False, []
                 learned_clause, jump_level = self.analyze_conflict()
+                assert (learned_clause not in cnf)
                 self.cnf.append(learned_clause)
                 self.assigned_clauses.append(False)
                 self.watch_literals.append([])
                 self.update_watch_literals([-1])
                 self.perform_backjump(jump_level)
-                print(self.cnf)
         return True, self.var_assignment
+
+    def decision_level_literals_num(self, level, clause):
+        counter = 0
+        for lit in clause:
+            if abs(lit) in self.decision_levels.keys() and self.decision_levels[abs(lit)] == level:
+                counter += 1
+        return counter
 
 
 def dlis(formula, var_assignment, assigned_clauses):
@@ -282,7 +281,6 @@ def dlis(formula, var_assignment, assigned_clauses):
                 if abs(literal) not in var_assignment.keys():
                     appearances_dict[literal] += 1
     chosen_literal = max(appearances_dict, key=lambda k: appearances_dict[k])
-    print("appearances_dict ", appearances_dict)
     return abs(chosen_literal), chosen_literal > 0
 
 
@@ -301,22 +299,43 @@ def boolean_res(clause1, clause2):
     return None
 
 
+def parse_cnf(formula_file):
+    cnf = []
+    for line in formula_file.readlines():
+        if len(line.strip()) > 0 and (not line.strip()[0].isalpha() and not line.strip()[0] == '%'):
+            to_add = [int(num) for num in line.split()]
+            if to_add[-1] == 0:
+                to_add.pop()
+            if len(to_add) > 0:
+                cnf.append(to_add)
+    print("##### ", formula_file, " #####")
+    print(cnf)
+    return cnf
+
+
 if __name__ == '__main__':
     # formula = Not(Imp(Not(And(Atomic('p'), Atomic('q'))), Not(Atomic('r'))))
-    # formula = And(Atomic('p'), Atomic('q'))
     # f2cnf = FormulaToCNF(formula)
     # f2cnf.run()
     # cnf = f2cnf.cnf
     # print("cnf: ", cnf)
-    formula = open("3color_formula.txt")
-    cnf = []
-    for line in formula.readlines():
-        if len(line) > 0:
-            cnf.append([int(num) for num in line.split()])
-    print(cnf)
 
-    a = Assignments(cnf)
-    # print(a.watch_literals)
-    # print(a.var_assignment, a.assigned_clauses)
-    # print(a.watch_literals)
-    print(a.solve())
+    files = os.listdir("SAT_examples")
+    for file in files:
+        try:
+            formula = open(os.path.join("SAT_examples", file))
+            cnf = parse_cnf(formula)
+            a = Assignments(cnf)
+            assert (a.solve()[0])
+        except UnicodeDecodeError:
+            continue
+
+    files = os.listdir("UNSAT_examples")
+    for file in files:
+        try:
+            formula = open(os.path.join("UNSAT_examples", file))
+            cnf = parse_cnf(formula)
+            a = Assignments(cnf)
+            assert (not a.solve()[0])
+        except UnicodeDecodeError:
+            continue

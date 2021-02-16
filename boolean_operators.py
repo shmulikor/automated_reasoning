@@ -1,3 +1,4 @@
+import numpy as np
 
 def names_generator():
     i = 0
