@@ -66,3 +66,56 @@ class Atomic(BooleanOperator):
             super().__init__(names[name])
         self.val = name
         print(f"{self.name}: {self.val}")
+
+
+# A class responsible for converting a general formula to CNF
+# CNF is represented as a list of lists. Lower level list represents the clauses, and elements represent literals
+# Atomic variables represented by abs of literals, negative elements are negated atomics
+class FormulaToCNF:
+    def __init__(self, formula):
+        self.formula = formula
+        self.cnf = []
+
+    @staticmethod
+    def simple_cnf(p, q, r, type):
+        # Manual conversion of (p <-> q*r) to CNF, for every connector * # TODO validate
+        if type == And:
+            return [[-p, q], [-p, r], [p, -q, -r]]
+        elif type == Or:
+            return [[-p, q, r], [p, -q], [p, -r]]
+        elif type == Not:
+            return [[p, q], [-p, -q]]
+        elif type == Imp:
+            return [[-p, -q, r], [p, q], [p, -r]]
+        elif type == Equiv:
+            return [[p, q, r], [-p, -q, -r]]
+        return
+
+    def tseitin(self):
+        # Recursively convert to Tseitin form
+        return self.tseitin_helper(self.formula, [[self.formula.name]])
+
+    def tseitin_helper(self, formula, list):
+        if type(formula) == Atomic:
+            return
+        elif type(formula) == Not:
+            list.extend(self.simple_cnf(formula.name, formula.param.name, None, type(formula)))
+            self.tseitin_helper(formula.param, list)
+        else:
+            list.extend(self.simple_cnf(formula.name, formula.left.name, formula.right.name, type(formula)))
+            self.tseitin_helper(formula.left, list)
+            self.tseitin_helper(formula.right, list)
+        return list
+
+    def preprocessing(self):
+        # Removes redundant literals and trivial clauses from Tseitin formula
+        processed_tseitin = []
+        for clause in self.cnf:
+            clause = list(set(clause))  # remove redundant literals
+            if len(set(np.abs(clause))) == len(np.abs(clause)):  # remove trivial clauses
+                processed_tseitin.append(clause)
+        return processed_tseitin
+
+    def run(self):
+        self.cnf = self.tseitin()
+        self.cnf = self.preprocessing()
