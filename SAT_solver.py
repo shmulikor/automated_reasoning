@@ -1,10 +1,14 @@
 import numpy as np
 from collections import defaultdict
 from boolean_operators import And, Or, Not, Imp, Equiv, Atomic
-import networkx  as nx
+import networkx as nx
 import matplotlib.pyplot as plt
 import copy
 
+CONFLICT_NODE = 0
+
+
+# TODO maybe erase assertions after debugging
 
 # A class responsible for converting a general formula to CNF
 # CNF is represented as a list of lists. Lower level list represents the clauses, and elements represent literals
@@ -59,8 +63,6 @@ class FormulaToCNF:
         self.cnf = self.preprocessing()
 
 
-
-
 class Assignments:
     def __init__(self, cnf):
         self.cnf = cnf
@@ -70,12 +72,12 @@ class Assignments:
         self.splits = []
         self.current_decision_level = 0
         self.bcp_implications = {}  # Used for implications graph. Keys are literals, values are clauses implied from
+        self.watch_literals = []
         self.init_watch_literals()
 
     def init_watch_literals(self):
         # Upon initialization - all literals are unassigned
         # Choose two random literals from each clause (or one, if there is only one)
-        self.watch_literals = []
         for i, clause in enumerate(self.cnf):
             self.watch_literals.append([])
             lit_set = set(clause)
@@ -107,7 +109,7 @@ class Assignments:
         changed = True
         if len(self.splits) > 0:
             bcp_candidates = self.get_bcp_candidates(self.splits[-1] * (1 if self.var_assignment[self.splits[-1]]
-            else -1))
+                                                                        else -1))
         else:
             bcp_candidates = self.cnf
         while changed:
@@ -132,10 +134,10 @@ class Assignments:
                                 changed = True
                                 involved_indices = [j for j, clause in enumerate(self.cnf) if
                                                     chosen_var in self.cnf[j] or -chosen_var in self.cnf[j]]
-                                bcp_candidates = self.get_bcp_candidates(chosen_var) # TODO review carefully - should
+                                bcp_candidates = self.get_bcp_candidates(chosen_var)  # TODO review carefully - should
                                 # first choose candidates and then update or other way around?
                                 self.update_watch_literals(involved_indices)
-                                for i in involved_indices: # TODO optimize
+                                for i in involved_indices:  # TODO optimize
                                     if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
                                         self.assigned_clauses[i] = True
         return self.has_false_clause()
@@ -150,30 +152,30 @@ class Assignments:
 
     def false_literals_in_clause(self, clause):
         return len([l for l in clause if ((l < 0 and abs(l) in self.var_assignment.keys() and
-                                                     self.var_assignment[abs(l)])
-                                                    or
-                                                    (l > 0 and l in self.var_assignment.keys() and
-                                                     not self.var_assignment[l]))])
+                                           self.var_assignment[abs(l)])
+                                          or
+                                          (l > 0 and l in self.var_assignment.keys() and
+                                           not self.var_assignment[l]))])
 
     def decide_next(self):
         # Splits cases by using DLIS heuristic, and updates all relevant fields
         # to support non-chronological backjumps
         var, assign = dlis(self.cnf, self.var_assignment, self.assigned_clauses)
-        assert (var > 0)  # TODO maybe erase after debugging
+        assert (var > 0)
         self.splits.append(var)
         self.var_assignment[var] = assign
         self.current_decision_level += 1
         self.decision_levels[var] = self.current_decision_level
         involved_indices = [i for i, clause in enumerate(self.cnf) if var in self.cnf[i] or -var in self.cnf[i]]
         # Update watch literals for every clause with decided literal
-        self.update_watch_literals(involved_indices) # TODO, maybe create another list of relevant indices
+        self.update_watch_literals(involved_indices)  # TODO, maybe create another list of relevant indices
         # Update assigned clauses
         for i in involved_indices:
             if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
                 self.assigned_clauses[i] = True
 
     def perform_backjump(self, level):
-        assert(level >= 0)
+        assert (level >= 0)
         # Performs non-chronological backjump to a specified decision level
         self.splits = self.splits[:level]
         self.current_decision_level = level
@@ -192,17 +194,19 @@ class Assignments:
 
     def create_implications_graph(self):
         imp_graph = nx.DiGraph()
-        imp_graph.add_node(0) # Conflict node numbered as 0
+        imp_graph.add_node(CONFLICT_NODE)  # Conflict node numbered as 0
         newly_added = set()
         # Add nodes for all falsified clauses
         for i, clause in enumerate(self.cnf):
-            if self.assigned_clauses[i]: # Check for assigned clauses only
-                if self.false_literals_in_clause(clause) == len(clause): # TODO maybe just one conflict?
+            if self.assigned_clauses[i]:  # Check for assigned clauses only
+                if self.false_literals_in_clause(clause) == len(clause):  # TODO maybe just one conflict?
                     for literal in clause:
                         imp_graph.add_node(-literal)
-                        imp_graph.add_edge(-literal, 0, weight=i)
+                        imp_graph.add_edge(-literal, CONFLICT_NODE, weight=i)
                         newly_added.add(literal)
-        # Repeat until convergence using implications and decision levels (root nodes)
+        # Repeat until convergence using implications and decision levels (root nodes):
+        # Add edges from nodes in the graph implied by bcp steps
+        # Weight of edges is the index of the clauses from which the implication is deduced
         # 0 level bcp should also be roots as well
         while len(newly_added) > 0:
             update = set()
@@ -211,7 +215,7 @@ class Assignments:
                     clause = self.cnf[self.bcp_implications[var]]
                     lit = var if self.var_assignment[var] else -var
                     for implier in clause:
-                        if(abs(implier) != var):
+                        if (abs(implier) != var):
                             imp_graph.add_node(-implier)
                             imp_graph.add_edge(-implier, lit, weight=self.bcp_implications[var])
                             update.add(abs(implier))
@@ -220,13 +224,54 @@ class Assignments:
         nx.draw_networkx(imp_graph)
         print(self.var_assignment)
         plt.show()
-        assert(nx.algorithms.is_directed_acyclic_graph(imp_graph))
+        assert (nx.algorithms.is_directed_acyclic_graph(imp_graph))
         return imp_graph
 
     def analyze_conflict(self):
         # Creates implications graph and decides using UIP the backjump level and the learned clause
         imp_graph = self.create_implications_graph()
+        UIP = self.find_first_UIP(imp_graph)
+        conflict_clause = self.learn_clause(imp_graph, UIP)
+        # jump_level = second-last decision level of a variable in the conflict clause
         return [-2], 1
+
+    def find_first_UIP(self, imp_graph):
+        # Returns the last decision point in the graph
+        # TODO maybe we should assert it is the last decision?
+        current_decision = CONFLICT_NODE
+
+        for decision in reversed(self.splits):
+            assert (decision in self.var_assignment.keys())
+            lit = decision if self.var_assignment[decision] else -decision
+            if imp_graph.__contains__(lit):
+                current_decision = lit
+                break
+        assert (current_decision != CONFLICT_NODE)
+
+        # Create a set of all nodes in all paths from current decision to the conflict node
+        paths = nx.all_simple_paths(imp_graph, current_decision, CONFLICT_NODE)
+        UIPS = set(next(paths))
+        for path in paths:
+            UIPS = UIPS.intersection(set(path))
+
+        # If conflict node is the only UIP, it is the first
+        if CONFLICT_NODE in UIPS and len(UIPS) == 1:
+            return CONFLICT_NODE
+
+        # Otherwise pick the UIP closest to conflict node, which is not the conflict node
+        UIPS.remove(CONFLICT_NODE)
+        distance = float('inf')
+        first_UIP = CONFLICT_NODE
+        for node in UIPS:
+            temp_distance = len(nx.bidirectional_shortest_path(imp_graph, node, CONFLICT_NODE))
+            if temp_distance < distance:
+                distance = temp_distance
+                first_UIP = node
+        print("First UIP is : ", first_UIP) #TODO remove
+        return first_UIP
+
+    def learn_clause(self, imp_graph, UIP):
+        pass
 
     def solve(self):
         while (not all(self.assigned_clauses)) or self.has_false_clause():  # TODO consider better condition
@@ -236,14 +281,14 @@ class Assignments:
                 self.decide_next()
                 # TODO - should we check again for false clauses and backjump, or could it lead to infinite loop?
             else:
-                learned_clause, bj_level = self.analyze_conflict()
-                if bj_level < 0:  # 0 Level conflict
+                learned_clause, jump_level = self.analyze_conflict()
+                if jump_level < 0:  # 0 Level conflict
                     return False, []
                 self.cnf.append(learned_clause)
                 self.assigned_clauses.append(False)
                 self.watch_literals.append([])
                 self.update_watch_literals([-1])
-                self.perform_backjump(bj_level)
+                self.perform_backjump(jump_level)
         return True, self.var_assignment
 
 
@@ -258,6 +303,21 @@ def dlis(formula, var_assignment, assigned_clauses):
                     appearances_dict[literal] += 1
     chosen_literal = max(appearances_dict, key=lambda k: appearances_dict[k])
     return abs(chosen_literal), chosen_literal > 0
+
+
+def boolean_res(clause1, clause2):
+    # Returns the resolvent of two clauses - if one includes literal l, and the other -l
+    # Then the resolvent is a disjunction of all other literals in both clauses
+    # Assuming they are both a list of literals (representing a disjunctions of them)
+    # Returns None if the clauses don't contain a literal and its negation
+    for lit in clause1:
+        if -lit in clause2:
+            part1 = set(clause1) # Use set to immediately remove redundant literals
+            part1.remove(lit)
+            part2 = set(clause2)
+            part2.remove(-lit)
+            return list(part1.union(part2))
+    return None
 
 
 if __name__ == '__main__':
