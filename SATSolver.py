@@ -7,7 +7,7 @@ import os
 
 CONFLICT_NODE = 0
 DRAW_IMP_GRAPH = False
-CHECK_SAT = True
+CHECK_SAT = False
 
 
 # Assumption - var numbers are given in continuous manner
@@ -336,10 +336,10 @@ def run_cnf_files(dir):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 0 and sys.argv[1]:  # Toggle between hard-coded formula and reading from CNF files
+    if len(sys.argv) and sys.argv[1] == "0":  # Toggle between hard-coded formula and reading from CNF files
         formula = Not(Imp(Not(And(Atomic('p'), Atomic('q'))), Not(Atomic('r'))))
-        f2cnf = FormulaToCNF(formula)
-        f2cnf.run()
+        f2cnf = FormulaProcessor(formula)
+        f2cnf.convert_and_preprocess()
         print(SATSolver(f2cnf.cnf).solve())
     else:
         dir = "SAT_examples" if CHECK_SAT else "UNSAT_examples"

@@ -94,10 +94,11 @@ class Atomic(BooleanOperator):
 # A class responsible for converting a general formula to CNF
 # CNF is represented as a list of lists. Lower level lists represent the clauses, and elements represent literals
 # Atomic variables represented by abs of literals, negative elements are negated atomics
-class FormulaToCNF:
+class FormulaProcessor:
     def __init__(self, formula):
         self.formula = formula
         self.cnf = []
+        self.atomic_abstractions = {}
 
     @staticmethod
     def simple_cnf(p, q, r, bool_op):
@@ -117,6 +118,10 @@ class FormulaToCNF:
 
     def tseitin(self):
         # Calls for recursive conversion to Tseitin form
+        if type(self.formula) == Atomic:
+            inv_name = {v: k for k, v in names.items()}
+            self.atomic_abstractions[self.formula.name] = inv_name[self.formula.name]
+            return [[self.formula.name]]
         return self.tseitin_helper(self.formula, [[self.formula.name]])
 
     def tseitin_helper(self, formula, tseitin):
@@ -124,6 +129,8 @@ class FormulaToCNF:
         # Formula is given in boolean operators form
         # cnf is returned as a lists of lists (clauses) of numbers (negation represented by minus sign)
         if type(formula) == Atomic:
+            inv_name = {v: k for k, v in names.items()}
+            self.atomic_abstractions[formula.name] = inv_name[formula.name]
             return
         elif type(formula) == Not:
             tseitin.extend(self.simple_cnf(formula.name, formula.param.name, None, type(formula)))
@@ -143,7 +150,7 @@ class FormulaToCNF:
                 processed_tseitin.append(clause)
         return processed_tseitin
 
-    def run(self):
+    def convert_and_preprocess(self):
         # Converts formula to Tseitin form and preprocesses it
         self.cnf = self.tseitin()
         self.cnf = self.preprocessing()
