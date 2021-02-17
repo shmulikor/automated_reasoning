@@ -6,8 +6,10 @@ import os
 
 CONFLICT_NODE = 0
 
+backjumps = 0
 
 # Assumption - var numbers are given in continuous manner
+# TODO Convert inputs to tseitin?
 
 
 class Assignments:
@@ -320,22 +322,27 @@ if __name__ == '__main__':
     # cnf = f2cnf.cnf
     # print("cnf: ", cnf)
 
-    files = os.listdir("SAT_examples")
-    for file in files:
-        try:
-            formula = open(os.path.join("SAT_examples", file))
-            cnf = parse_cnf(formula)
-            a = Assignments(cnf)
-            assert (a.solve()[0])
-        except UnicodeDecodeError:
-            continue
+    # files = os.listdir("SAT_examples")
+    # for file in files:
+    #     try:
+    #         formula = open(os.path.join("SAT_examples", file))
+    #         cnf = parse_cnf(formula)
+    #         a = Assignments(cnf)
+    #         assert (a.solve()[0])
+    #     except UnicodeDecodeError:
+    #         continue
 
-    files = os.listdir("UNSAT_examples")
-    for file in files:
-        try:
-            formula = open(os.path.join("UNSAT_examples", file))
-            cnf = parse_cnf(formula)
-            a = Assignments(cnf)
-            assert (not a.solve()[0])
-        except UnicodeDecodeError:
-            continue
+  files = os.listdir("UNSAT_examples")
+  for file in files:
+      try:
+          formula = open(os.path.join("UNSAT_examples", file))
+          cnf = parse_cnf(formula)
+          a = Assignments(cnf)
+          assert (not a.solve()[0])
+      except UnicodeDecodeError:
+         continue
+
+
+
+
+
