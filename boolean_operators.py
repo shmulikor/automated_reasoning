@@ -1,6 +1,9 @@
 import numpy as np
 
+
 def names_generator():
+    # Generates names for new variables (starting at 1)
+    # Each var is represented by a number
     i = 0
     while True:
         i += 1
@@ -9,56 +12,74 @@ def names_generator():
 
 names = {}
 counter = names_generator()
-
+DEBUG = False
 
 class BooleanOperator:
+    # General class representing a boolean operator
     def __init__(self, name: int):
         self.name = name
 
 
 class And(BooleanOperator):
+    # A class representing the And boolean operator
+
     def __init__(self, left: BooleanOperator, right: BooleanOperator):
         super().__init__(next(counter))
         self.left = left
         self.right = right
-        print(f"{self.name}: {self.left.name} and {self.right.name}")
+        if DEBUG:
+            print(f"{self.name}: {self.left.name} and {self.right.name}")
 
 
 class Or(BooleanOperator):
+    # A class representing the Or boolean operator
+
     def __init__(self, left: BooleanOperator, right: BooleanOperator):
         super().__init__(next(counter))
         self.left = left
         self.right = right
-        print(f"{self.name}: {self.left.name} or {self.right.name}")
+        if DEBUG:
+            print(f"{self.name}: {self.left.name} or {self.right.name}")
 
 
 class Not(BooleanOperator):
+    # A class representing the Not boolean operator
+
     def __init__(self, param: BooleanOperator):
         if type(param) == Atomic:
             super().__init__(-param.name)
         else:
             super().__init__(next(counter))
         self.param = param
-        print(f"{self.name}: not {self.param.name}")
+        if DEBUG:
+            print(f"{self.name}: not {self.param.name}")
 
 
 class Imp(BooleanOperator):
+    # A class representing the Implication boolean operator
+
     def __init__(self, left: BooleanOperator, right: BooleanOperator):
         super().__init__(next(counter))
         self.left = left
         self.right = right
-        print(f"{self.name}: {self.left.name} -> {self.right.name}")
+        if DEBUG:
+           print(f"{self.name}: {self.left.name} -> {self.right.name}")
 
 
 class Equiv(BooleanOperator):
+    # A class representing the Equivalence boolean operator
+
     def __init__(self, left: BooleanOperator, right: BooleanOperator):
         super().__init__(next(counter))
         self.left = left
         self.right = right
-        print(f"{self.name}: {self.left.name} <-> {self.right.name}")
+        if DEBUG:
+            print(f"{self.name}: {self.left.name} <-> {self.right.name}")
 
 
 class Atomic(BooleanOperator):
+    # A class representing an Atomic proposition
+
     def __init__(self, name: str):
         if name not in names.keys():
             names[name] = next(counter)
@@ -66,11 +87,12 @@ class Atomic(BooleanOperator):
         else:
             super().__init__(names[name])
         self.val = name
-        print(f"{self.name}: {self.val}")
+        if DEBUG:
+            print(f"{self.name}: {self.val}")
 
 
 # A class responsible for converting a general formula to CNF
-# CNF is represented as a list of lists. Lower level list represents the clauses, and elements represent literals
+# CNF is represented as a list of lists. Lower level lists represent the clauses, and elements represent literals
 # Atomic variables represented by abs of literals, negative elements are negated atomics
 class FormulaToCNF:
     def __init__(self, formula):
@@ -78,35 +100,39 @@ class FormulaToCNF:
         self.cnf = []
 
     @staticmethod
-    def simple_cnf(p, q, r, type):
-        # Manual conversion of (p <-> q*r) to CNF, for every connector * # TODO validate
-        if type == And:
+    def simple_cnf(p, q, r, bool_op):
+        # Results of Manual conversion of (p <-> q*r) to CNF, for every boolean operator *
+        # According to algorithm learned in class - conversion to NNF and using distribution
+        if bool_op == And:
             return [[-p, q], [-p, r], [p, -q, -r]]
-        elif type == Or:
+        elif bool_op == Or:
             return [[-p, q, r], [p, -q], [p, -r]]
-        elif type == Not:
+        elif bool_op == Not:
             return [[p, q], [-p, -q]]
-        elif type == Imp:
+        elif bool_op == Imp:
             return [[-p, -q, r], [p, q], [p, -r]]
-        elif type == Equiv:
-            return [[p, q, r], [-p, -q, -r]]
+        elif bool_op == Equiv:
+            return [[p, q, r], [p, -q, -r], [-p, q, -r], [-p, -q, r]]
         return
 
     def tseitin(self):
-        # Recursively convert to Tseitin form
+        # Calls for recursive conversion to Tseitin form
         return self.tseitin_helper(self.formula, [[self.formula.name]])
 
-    def tseitin_helper(self, formula, list):
+    def tseitin_helper(self, formula, tseitin):
+        # Performs the core of Tseitin transformation
+        # Formula is given in boolean operators form
+        # cnf is returned as a lists of lists (clauses) of numbers (negation represented by minus sign)
         if type(formula) == Atomic:
             return
         elif type(formula) == Not:
-            list.extend(self.simple_cnf(formula.name, formula.param.name, None, type(formula)))
-            self.tseitin_helper(formula.param, list)
+            tseitin.extend(self.simple_cnf(formula.name, formula.param.name, None, type(formula)))
+            self.tseitin_helper(formula.param, tseitin)
         else:
-            list.extend(self.simple_cnf(formula.name, formula.left.name, formula.right.name, type(formula)))
-            self.tseitin_helper(formula.left, list)
-            self.tseitin_helper(formula.right, list)
-        return list
+            tseitin.extend(self.simple_cnf(formula.name, formula.left.name, formula.right.name, type(formula)))
+            self.tseitin_helper(formula.left, tseitin)
+            self.tseitin_helper(formula.right, tseitin)
+        return tseitin
 
     def preprocessing(self):
         # Removes redundant literals and trivial clauses from Tseitin formula
@@ -118,5 +144,6 @@ class FormulaToCNF:
         return processed_tseitin
 
     def run(self):
+        # Converts formula to Tseitin form and preprocesses it
         self.cnf = self.tseitin()
         self.cnf = self.preprocessing()
