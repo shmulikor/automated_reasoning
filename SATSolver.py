@@ -4,6 +4,7 @@ from boolean_operators import *
 import networkx as nx
 import matplotlib.pyplot as plt
 import os
+from itertools import chain
 
 CONFLICT_NODE = 0
 DRAW_IMP_GRAPH = False
@@ -19,7 +20,8 @@ class SATSolver:
 
     def __init__(self, cnf):
         self.cnf = cnf
-        self.variables_num = max([max(np.abs(clause)) for clause in self.cnf])
+        self.variables_num = len(set(chain(*[np.abs(c) for c in self.cnf])))
+        # self.variables_num = max([max(np.abs(clause)) for clause in self.cnf]) TODO erase at end
         self.var_assignment = {}
         self.assigned_clauses = [False] * len(cnf)
         self.decision_levels = {}
@@ -29,6 +31,7 @@ class SATSolver:
         self.watch_literals = []
         self.init_watch_literals()
         self.cur_conflict_clause = 0
+        self.cur_bcp_candidates = []
 
     def init_watch_literals(self):
         # Upon initialization - all literals are unassigned
@@ -54,31 +57,37 @@ class SATSolver:
 
     def solve(self):
         # Runs the main CDCL algorithm
-        while (not all(self.assigned_clauses)) and (len(self.var_assignment.keys()) != self.variables_num or
-                                                    self.has_false_clause()):
+        while self.should_continue():
             # While not everything was assigned, perform BCP (to saturation) and solve conflicts if any has risen
             has_conflict = self.bcp()
             if not has_conflict and len(self.var_assignment.keys()) != self.variables_num:
                 self.decide_next()
             elif has_conflict:
-                if self.current_decision_level == 0:
+                if not self.resolve_conflict():
                     return False, []
-                learned_clause, jump_level = self.analyze_conflict()
-                # Add the learned clause and update all relevant data structures
-                assert (learned_clause not in self.cnf)
-                self.cnf.append(learned_clause)
-                self.assigned_clauses.append(False)
-                self.watch_literals.append([])
-                self.update_watch_literals([-1])
-                self.perform_backjump(jump_level)
         return True, self.var_assignment
+
+    def should_continue(self):
+        return (not all(self.assigned_clauses)) and (len(self.var_assignment.keys()) != self.variables_num or
+                                                     self.has_false_clause())
+
+    def resolve_conflict(self):
+        # Resolves the conflict in the assignment, assuming there is one
+        # Returns false iff current decision level is 0
+        assert (self.has_false_clause())
+        if not self.current_decision_level:
+            return False
+        learned_clause, jump_level = self.analyze_conflict()
+        self.add_clause(learned_clause)
+        self.perform_backjump(jump_level)
+        return True
 
     def bcp(self):
         # Performs BCP until saturation, returns True iff formula has a falsified clause
-        bcp_candidates = self.cnf  # In case there's no last decided literal
+        self.cur_bcp_candidates = self.cnf  # In case there's no last decided literal
         if len(self.splits) > 0:
             last = self.splits[-1]
-            bcp_candidates = self.get_bcp_candidates(last if self.var_assignment[last] else -last)
+            self.cur_bcp_candidates = self.get_bcp_candidates(last if self.var_assignment[last] else -last)
             involved_indices = [i for i, clause in enumerate(self.cnf) if last in self.cnf[i] or -last in self.cnf[i]]
             # Update watch literals for every clause with decided literal
             self.update_watch_literals(involved_indices)
@@ -87,7 +96,7 @@ class SATSolver:
         while changed:
             changed = False
             next_candidates = []
-            for clause in bcp_candidates:
+            for clause in self.cur_bcp_candidates:
                 i = self.cnf.index(clause)
                 if not self.assigned_clauses[i]:  # Assign if not assigned previously
                     if all([abs(l) in self.var_assignment.keys() for l in clause]):
@@ -96,12 +105,13 @@ class SATSolver:
                         unassigned = [l for l in clause if abs(l) not in self.var_assignment.keys()]
                         if len(unassigned) == 1:  # If only single variable is indeed unassigned
                             assigned = [l for l in clause if abs(l) in self.var_assignment.keys()]
-                            past_assignments = [self.var_assignment[l] for l in assigned if l > 0] +\
+                            past_assignments = [self.var_assignment[l] for l in assigned if l > 0] + \
                                                [not self.var_assignment[-l] for l in assigned if l < 0]
                             if not any(past_assignments):  # If all other literals in clause are false
                                 next_candidates.extend(self.bcp_updates(clause, unassigned[0]))
                                 changed = True
-            bcp_candidates = next_candidates
+            self.cur_bcp_candidates = next_candidates
+        self.cur_bcp_candidates = []
         return self.has_false_clause()
 
     def get_bcp_candidates(self, literal):
@@ -170,19 +180,13 @@ class SATSolver:
 
     def analyze_conflict(self):
         # Creates implications graph and decides using UIP the backjump level and the learned clause
-        assert (self.current_decision_level > 0)
+        assert self.current_decision_level
         imp_graph = self.create_implications_graph()
         FUIP = self.find_first_UIP(imp_graph)
         conflict_clause = self.learn_clause(imp_graph, FUIP)
         self.cur_conflict_clause = -1  # Reverse after solving the conflict
-
+        jump_level = self.clause_jump_level(conflict_clause)
         # Finds second highest decision level in learned clause
-        cc_decision_levels = []
-        for lit in conflict_clause:
-            cc_decision_levels.append(self.decision_levels[abs(lit)])
-        cc_decision_levels = list(set(cc_decision_levels))
-        cc_decision_levels.sort()
-        jump_level = cc_decision_levels[-2] if len(cc_decision_levels) > 1 else 0
         return conflict_clause, jump_level
 
     def create_implications_graph(self):
@@ -204,7 +208,7 @@ class SATSolver:
         # Add edges from nodes in the graph implied by bcp steps
         # Weight of edges is the index of the clauses from which the implication is deduced
         # Root nodes are decided literals or 0-level bcp implications
-        while len(newly_added) > 0:
+        while len(newly_added):
             update = set()
             for var in newly_added:
                 # Check for more nodes if current var is not decided and implied by bcp in level > 0
@@ -281,6 +285,36 @@ class SATSolver:
                 count += 1
         return count
 
+    def add_clause(self, clause):
+        # Add a clause to the formula and update all relevant data structures
+
+        assert (clause not in self.cnf)
+        self.cnf.append(clause)
+        self.assigned_clauses.append(False)
+        self.watch_literals.append([])
+        self.update_watch_literals([-1])
+
+    def clause_jump_level(self, conflict_clause):
+        # computes the jump level of a clause
+        cc_decision_levels = []
+        for lit in conflict_clause:
+            cc_decision_levels.append(self.decision_levels[abs(lit)])
+        cc_decision_levels = list(set(cc_decision_levels))
+        cc_decision_levels.sort()
+        return cc_decision_levels[-2] if len(cc_decision_levels) > 1 else 0
+
+    def assign_variables(self, var_list):
+        for var in var_list:
+            self.var_assignment[var] = True
+            self.decision_levels[var] = self.current_decision_level
+            involved_indices = [j for j, clause in enumerate(self.cnf) if
+                                var in self.cnf[j] or -var in self.cnf[j]]
+            self.cur_bcp_candidates = self.get_bcp_candidates(var)
+            self.update_watch_literals(involved_indices)
+            for j in involved_indices:  # New clauses can be assigned
+                if all([abs(l) in self.var_assignment.keys() for l in self.cnf[j]]):
+                    self.assigned_clauses[j] = True
+
 
 def dlis(formula, var_assignment, assigned_clauses):
     # Decides the next variable assignment according to DLIS heuristic
@@ -319,13 +353,13 @@ def run_cnf_files(dir):
             with open(os.path.join(dir, file)) as formula_file:
                 cnf = []
                 for line in formula_file.readlines():
-                    if len(line.strip()) > 0 and (not line.strip()[0].isalpha() and not line.strip()[0] == '%'):
+                    if len(line.strip()) and (not line.strip()[0].isalpha() and not line.strip()[0] == '%'):
                         to_add = [int(num) for num in line.split()]
                         if to_add[-1] == 0:
                             to_add.pop()
-                        if len(to_add) > 0:
+                        if len(to_add):
                             cnf.append(to_add)
-                print("##### ", os.path.join(dir, file), " #####")
+                print("Solving: ", os.path.join(dir, file))
                 solution = SATSolver(cnf)
                 if CHECK_SAT:
                     assert (solution.solve()[0])
