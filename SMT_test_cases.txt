@@ -1,0 +1,14 @@
+(a=b) & (b=c) & (d=e || a=c || f=g) 
+(g(a)=c) & ( f(g(a))!=f(c) || g(a)=d ) & (c != d)	
+(g(a)=c || x=y) & ( f(g(a))!=f(c) || g(a)=d ) & (c != d) & (f(x)!=f(y))	
+(x!=y) & (f(x)=f(y))
+(f(a)=a)  &  (f(f(a))!=a)	
+(f(f(f(a)))=a) & (f(f(f(f(f(a))))) = a) & (f(a) != a)
+(x!=g(y,z))  ||  (f(x)=f(g(y,z)))		
+(a=b) & (f(c)=c) & (f(a)=b)	
+(f(a,b)=a) & (f(f(a,b),b)!=a)
+f(g(x))=g(f(x))  &  f(g(f(y)))=x  &  f(y)=x  &  g(f(x))!=x 		
+g(f(z))=s  &  g(f(y))=x  &  y=z
+(a=b) & (a!=b || s!=t || b=c) & (s=t || t!=r || f(s)=f(t)) & (b!=c || t!=r || f(s)=f(a)) & (f(s)!=f(a) || f(a)!=f(c)) 	
+(f(x)=f(y) || a=b)  &  x=y 
+f(x)!=f(y)  &  (x=y & a=b) (f(f(x)!=f(f(y))) & (f(x)=f(y)  &  x=y)
