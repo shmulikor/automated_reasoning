@@ -1,6 +1,7 @@
 import sys
 from collections import defaultdict
 from boolean_operators import *
+
 import networkx as nx
 import matplotlib.pyplot as plt
 import os
@@ -8,7 +9,7 @@ from itertools import chain
 
 CONFLICT_NODE = 0
 DRAW_IMP_GRAPH = False
-CHECK_SAT = False
+CHECK_SAT = True
 
 
 # Assumption - var numbers are given in continuous manner
@@ -21,7 +22,6 @@ class SATSolver:
     def __init__(self, cnf):
         self.cnf = cnf
         self.variables_num = len(set(chain(*[np.abs(c) for c in self.cnf])))
-        # self.variables_num = max([max(np.abs(clause)) for clause in self.cnf]) TODO erase at end
         self.var_assignment = {}
         self.assigned_clauses = [False] * len(cnf)
         self.decision_levels = {}
@@ -68,8 +68,8 @@ class SATSolver:
         return True, self.var_assignment
 
     def should_continue(self):
-        return (not all(self.assigned_clauses)) and (len(self.var_assignment.keys()) != self.variables_num or
-                                                     self.has_false_clause())
+        return (not all(self.assigned_clauses)) or len(self.var_assignment.keys()) != self.variables_num or \
+                                                     self.has_false_clause()
 
     def resolve_conflict(self):
         # Resolves the conflict in the assignment, assuming there is one
@@ -84,7 +84,8 @@ class SATSolver:
 
     def bcp(self):
         # Performs BCP until saturation, returns True iff formula has a falsified clause
-        self.cur_bcp_candidates = self.cnf  # In case there's no last decided literal
+        self.cur_bcp_candidates = [self.cnf[i] for i, watchers in enumerate(self.watch_literals) if len(watchers) ==
+                                   1]  # In case there's no last decided literal, pick all possible candidates
         if len(self.splits) > 0:
             last = self.splits[-1]
             self.cur_bcp_candidates = self.get_bcp_candidates(last if self.var_assignment[last] else -last)
@@ -95,7 +96,6 @@ class SATSolver:
         changed = True
         while changed:
             changed = False
-            next_candidates = []
             for clause in self.cur_bcp_candidates:
                 i = self.cnf.index(clause)
                 if not self.assigned_clauses[i]:  # Assign if not assigned previously
@@ -108,35 +108,24 @@ class SATSolver:
                             past_assignments = [self.var_assignment[l] for l in assigned if l > 0] + \
                                                [not self.var_assignment[-l] for l in assigned if l < 0]
                             if not any(past_assignments):  # If all other literals in clause are false
-                                next_candidates.extend(self.bcp_updates(clause, unassigned[0]))
+                                self.bcp_updates(clause, unassigned[0])
                                 changed = True
-            self.cur_bcp_candidates = next_candidates
         self.cur_bcp_candidates = []
         return self.has_false_clause()
 
     def get_bcp_candidates(self, literal):
         # Returns sublist of all clauses which include the negation of the literal as a watch literal
-        # Add clauses with only one watch literal as well #TODO maybe fix
+        # Add clauses with only one watch literal as well #TODO fix
         # As stated in class, these are only ones relevant for BCP after assignment
         indices = [i for i, watchers in enumerate(self.watch_literals) if -literal in watchers]
         indices.extend([i for i, watchers in enumerate(self.watch_literals) if len(watchers) == 1])
         return [self.cnf[j] for j in indices]
 
-    def bcp_updates(self, clause, chosen_var):
+    def bcp_updates(self, clause, chosen_lit):
         # Performs all updates to internal data structures corresponding to BCP action
         i = self.cnf.index(clause)
-        self.var_assignment[abs(chosen_var)] = True if chosen_var > 0 else False
-        self.assigned_clauses[i] = True
-        self.decision_levels[abs(chosen_var)] = self.current_decision_level
-        self.bcp_implications[abs(chosen_var)] = (i, self.current_decision_level)
-        involved_indices = [j for j, clause in enumerate(self.cnf) if
-                            chosen_var in self.cnf[j] or -chosen_var in self.cnf[j]]
-        bcp_candidates = self.get_bcp_candidates(chosen_var)
-        self.update_watch_literals(involved_indices)
-        for j in involved_indices:  # New clauses can be assigned
-            if all([abs(l) in self.var_assignment.keys() for l in self.cnf[j]]):
-                self.assigned_clauses[j] = True
-        return bcp_candidates
+        self.assign_variable(abs(chosen_lit), True if chosen_lit > 0 else False)
+        self.bcp_implications[abs(chosen_lit)] = (i, self.current_decision_level)
 
     def has_false_clause(self):
         # returns true iff the formula has a falsified clause
@@ -287,7 +276,8 @@ class SATSolver:
 
     def add_clause(self, clause):
         # Add a clause to the formula and update all relevant data structures
-
+        if clause in self.cnf:
+            print(clause)
         assert (clause not in self.cnf)
         self.cnf.append(clause)
         self.assigned_clauses.append(False)
@@ -303,17 +293,21 @@ class SATSolver:
         cc_decision_levels.sort()
         return cc_decision_levels[-2] if len(cc_decision_levels) > 1 else 0
 
-    def assign_variables(self, var_list):
-        for var in var_list:
-            self.var_assignment[var] = True
-            self.decision_levels[var] = self.current_decision_level
-            involved_indices = [j for j, clause in enumerate(self.cnf) if
-                                var in self.cnf[j] or -var in self.cnf[j]]
-            self.cur_bcp_candidates = self.get_bcp_candidates(var)
-            self.update_watch_literals(involved_indices)
-            for j in involved_indices:  # New clauses can be assigned
-                if all([abs(l) in self.var_assignment.keys() for l in self.cnf[j]]):
-                    self.assigned_clauses[j] = True
+    def assign_variable(self, var, assignment):
+        # Assign a variable with given assignment
+        # Updates all relevant data structures
+        self.var_assignment[var] = assignment
+        self.decision_levels[var] = self.current_decision_level
+        involved_indices = [j for j, clause in enumerate(self.cnf) if
+                            var in self.cnf[j] or -var in self.cnf[j]]
+        candidates = self.get_bcp_candidates(var if assignment else -var)
+        for candidate in candidates:
+            if candidate not in self.cur_bcp_candidates:
+                self.cur_bcp_candidates.append(candidate)
+        self.update_watch_literals(involved_indices)
+        for j in involved_indices:  # New clauses can be assigned
+            if all([abs(l) in self.var_assignment.keys() for l in self.cnf[j]]):
+                self.assigned_clauses[j] = True
 
 
 def dlis(formula, var_assignment, assigned_clauses):
@@ -345,12 +339,14 @@ def boolean_res(clause1, clause2):
     return None
 
 
-def run_cnf_files(dir):
-    # Parses cnf files into our formula convention
-    files = os.listdir(dir)
+def run_cnf_files(directory):
+    # Parses cnf files into our formula convention, and solves the sat problem they describe
+    files = os.listdir(directory)
+    errors = 0
+    completed = 0
     for file in files:
         try:
-            with open(os.path.join(dir, file)) as formula_file:
+            with open(os.path.join(directory, file)) as formula_file:
                 cnf = []
                 for line in formula_file.readlines():
                     if len(line.strip()) and (not line.strip()[0].isalpha() and not line.strip()[0] == '%'):
@@ -359,14 +355,17 @@ def run_cnf_files(dir):
                             to_add.pop()
                         if len(to_add):
                             cnf.append(to_add)
-                print("Solving: ", os.path.join(dir, file))
+                print("Solving: ", os.path.join(directory, file))
                 solution = SATSolver(cnf)
                 if CHECK_SAT:
                     assert (solution.solve()[0])
                 else:
                     assert (not solution.solve()[0])
+                completed += 1
         except UnicodeDecodeError:
+            errors += 1
             continue
+    print("Checked ", completed, " files\n", errors, " files were not checked due to decoding errors")
 
 
 if __name__ == '__main__':
@@ -376,5 +375,5 @@ if __name__ == '__main__':
         f2cnf.convert_and_preprocess()
         print(SATSolver(f2cnf.cnf).solve())
     else:
-        dir = "SAT_examples" if CHECK_SAT else "UNSAT_examples"
-        run_cnf_files(dir)
+        directory = "SAT_examples" if CHECK_SAT else "UNSAT_examples"
+        run_cnf_files(directory)

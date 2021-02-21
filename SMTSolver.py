@@ -6,8 +6,9 @@ EQUAL = 2
 DRAW_CONG_DAG = False
 INVALID_JUMP_LEVEL = -1
 
-# TODO finish t-propagate
+
 # TODO ask Guy about the graph
+
 
 def abstractions_generator():
     # Generates names for new variables (starting at 1)
@@ -59,36 +60,33 @@ class SMTSolver:
 
     def solve(self):
         # Runs the SMT solver, decides whether the formula is uf-sat
-        while self.sat_solver.should_continue() or not self.decide_uf_sat(self.sat_solver.var_assignment):
+        while self.sat_solver.should_continue() or not self.decide_uf_sat():
             # Continue if the sat solver has not finished, or it has and needs to be corrected by theory
             has_conflict = self.sat_solver.bcp()
             if has_conflict:
                 if not self.sat_solver.resolve_conflict():
                     return False  # Logical contradiction (at decision level 0)
             else:
-                partial_assignment = self.sat_solver.var_assignment
-                if self.decide_uf_sat(partial_assignment):
-                    # TODO fix
-                    # if self.uf_propagate():
-                    #     continue
-                    # elif
-                    if len(self.sat_solver.var_assignment.keys()) != self.sat_solver.variables_num:
+                if self.decide_uf_sat():
+                    if self.uf_propagation(): # Perfrom t-propagation untill saturation, and return to BCP
+                        continue
+                    elif len(self.sat_solver.var_assignment.keys()) != self.sat_solver.variables_num:
                         self.sat_solver.decide_next()
                     else:
                         return True
                 else:  # Not uf-sat, need to learn new clause and backjump
-                    clause, jump_level = self.uf_conflict(partial_assignment)
+                    clause, jump_level = self.uf_conflict()
                     if jump_level == INVALID_JUMP_LEVEL:
                         return False  # Theory contradiction (at decision level 0)
                     self.sat_solver.add_clause(clause)
                     self.sat_solver.perform_backjump(jump_level)
         return True
 
-    def decide_uf_sat(self, partial_assignment):
+    def decide_uf_sat(self, potential_assignment=None):
         # Decides whether the partial assignment is consistent with the UF theory
 
         # Compute conjunction of all uf-expression corresponding to assigned variables
-        cong_formula = self.compute_partial_assignment_formula(partial_assignment)
+        cong_formula = self.compute_partial_assignment_formula(potential_assignment)
 
         # Get all subterms of the above mentioned expressions
         subterms_set = self.compute_formula_subterms(cong_formula)
@@ -101,7 +99,7 @@ class SMTSolver:
         self.reps = {}
         return is_sat
 
-    def uf_conflict(self, partial_assignment):
+    def uf_conflict(self):
         # Creates the conflict clause from a partial assignment
         # Assumes that the partial assignment indeed leads to a conflict
 
@@ -110,16 +108,25 @@ class SMTSolver:
             return [], INVALID_JUMP_LEVEL
 
         # Create naive clause from partial assignment and decide jump level
-        t_learn = [-lit if partial_assignment[lit] else lit for lit in partial_assignment.keys()]
+        t_learn = [-lit if self.sat_solver.var_assignment[lit] else lit for lit in self.sat_solver.var_assignment.keys()]
         jump_level = self.sat_solver.clause_jump_level(t_learn)
         return t_learn, jump_level
 
-    def compute_partial_assignment_formula(self, partial_assignment):
+    def compute_partial_assignment_formula(self, potential_assignment=None):
         # Compute conjunction of all uf-expression corresponding to assigned variables
+        # Take all variables assigned by internal sat solver, and additional variables as an option
+
         literals_conjunction = []
-        for var in partial_assignment.keys():
+        for var in self.sat_solver.var_assignment.keys():
             if var in self.boolean_abstraction:
-                literals_conjunction.append(self.parse_atomic(self.boolean_abstraction[var], partial_assignment[var]))
+                literals_conjunction.append(self.parse_atomic(self.boolean_abstraction[var], self.sat_solver.var_assignment[var]))
+
+        if potential_assignment is not None:
+            for var in potential_assignment.keys():
+                if var in self.boolean_abstraction:
+                    literals_conjunction.append(
+                        self.parse_atomic(self.boolean_abstraction[var], potential_assignment[var]))
+
         return literals_conjunction
 
     def compute_formula_subterms(self, cong_formula):
@@ -271,36 +278,29 @@ class SMTSolver:
                 last_idx = idx
         return arg_list
 
-    def uf_propagate(self):
+    def uf_propagation(self):
+        # Try assigning every unassigned variable corresponding to an atomic
+        # If one assignment results uf-unsat, we can deduce the theory implies the
+        # var should be assigned the other option
+        # Repeat until saturation
         changed = True
-        was_updated = False
+        propagation_counter = 0
         while changed:
-            changed = False
-            unassigned_vars = [key for key in self.boolean_abstraction.keys() if key not in
+            unassigned_vars = [var for var in self.boolean_abstraction.keys() if var not in
                                self.sat_solver.var_assignment.keys()]
-            unassigned_atomics = [self.boolean_abstraction[var] for var in unassigned_vars]
-            for atomic in unassigned_atomics:
-                parts = atomic.split('=')
-                left, right = parts[0], parts[1]
-                if self.check_cong(left, right):
+            changed = False
+            for var in unassigned_vars:
+                if not self.decide_uf_sat({var: True}):
+                    self.sat_solver.assign_variable(var, False)
                     changed = True
-                    was_updated = True
-        return was_updated
+                    propagation_counter += 1
+                elif not self.decide_uf_sat({var: False}):
+                    self.sat_solver.assign_variable(var, True)
+                    changed = True
+                    propagation_counter += 1
 
-    def check_cong(self, left, right):
-        expr = left + "=" + right
-        if expr in self.inv_boolean_abstraction.keys() and \
-                self.inv_boolean_abstraction[expr] in self.sat_solver.var_assignment.keys() and \
-                self.sat_solver.var_assignment[self.inv_boolean_abstraction[expr]]:
-            return True
+        return propagation_counter > 0
 
-        if self.is_func_call(left) and self.is_func_call(right) \
-                and left[:left.index('(')] == right[:right.index('(')]:
-            left_args = self.parse_function_arguments(left[left.index('(') + 1: -1])
-            right_args = self.parse_function_arguments(right[right.index('(') + 1: -1])
-            if len(left_args) == len(right_args):
-                return all([self.check_cong(left_args[i], right_args[i]) for i in range(len(left_args))])
-        return False
 
 if __name__ == '__main__':
     examples = [
