@@ -2,20 +2,67 @@ import numpy as np
 from scipy.linalg import lu, solve_triangular
 from scipy.optimize import linprog
 
+# TODO delete d,t from pivot function
+# TODO lu factorization
+# TODO num stab
+# TODO merge to SMT
 
-class RevisedSimplexAlgorithm:
+
+UNBOUNDED = 2
+INFEASIBLE = 1
+BOUNDED = 0
+
+
+class LP_SOLVER:
+
+
+    def __init__(self, A, b, c, rule, eta_threshold=10, epsilon=0.01):
+        self.A = A
+        self.b = b
+        self.c = c
+        self.rule = rule
+        self.eta_threshold = eta_threshold
+        self.epsilon = epsilon
+
+        if any(b < 0):
+            aux_A = np.hstack((np.array([-1] * len(b))[:, None], A))
+            aux_c = np.array([-1] + [0] * len(c))
+            new_c = np.concatenate(([0], c))
+            self.auxiliary = RevisedSimplexAlgorithm(aux_A.copy(), b.copy(), aux_c, rule, eta_threshold, epsilon, True)
+            self.mainLP = RevisedSimplexAlgorithm(aux_A.copy(), b.copy(), new_c, rule, eta_threshold, epsilon, False)
+        else:
+            self.auxiliary = None
+            self.mainLP = RevisedSimplexAlgorithm(A, b, c, rule, eta_threshold, epsilon, False)
+
+    def run(self):
+        if self.auxiliary:
+            b = self.auxiliary.b
+            n = self.auxiliary.n
+            min_idx = np.argmin(b)
+            self.auxiliary.perform_pivot(0, min_idx, abs(min(b)), np.array([-1] * n))
+            self.auxiliary.aux_pivot_history.append((0, min_idx, abs(min(b)), np.array([-1] * n)))
+            self.auxiliary.run()
+            if self.auxiliary.solution_type == BOUNDED and self.auxiliary.cur_assignment[0]:
+                self.solution_type = INFEASIBLE
+                return
+
+            history = self.auxiliary.aux_pivot_history
+            for enter_idx, leaving_idx, t, d in history:
+                self.mainLP.perform_pivot(enter_idx, leaving_idx, t, d)
+            self.mainLP.eraseX0()
+
+        self.mainLP.run()
+
+class RevisedSimplexAlgorithm():
     BLAND = "bland"
     DANTZIG = "dantzig"
-    UNBOUNDED = 2
-    INFEASIBLE = 1
-    BOUNDED = 0
     NO_INDEX = -1
 
-    def __init__(self, A, b, c, rule=DANTZIG, eta_threshold=10, epsilon=0.01, needs_aux=True):
+    def __init__(self, A, b, c, rule=DANTZIG, eta_threshold=100, epsilon=0.01, is_aux=True):
         assert rule == self.BLAND or rule == self.DANTZIG
         self.rule = rule
         self.epsilon = epsilon
-        self.needs_aux = needs_aux
+        self.is_aux = is_aux
 
         self.b = b
         self.n = len(b)
@@ -43,32 +90,22 @@ class RevisedSimplexAlgorithm:
         self.cur_objective = 0
         self.solution_type = -1
 
-    def run(self):
-        if any(self.b < 0) and self.needs_aux:
-            c = np.array([-1] + [0] * len(self.c_n))
-            A = np.hstack((np.array([-1] * len(b))[:, None], self.A_n))
-            auxiliary = RevisedSimplexAlgorithm(A, b ,c, self.rule, self.eta_threshold, self.epsilon, False)
-            min_idx = np.argmin(self.b)
-            auxiliary.perform_pivot(0,min_idx,abs(min(self.b)), np.array([-1]*self.n))
-            auxiliary.run()
-            print("Aux sol: ", auxiliary.solution_type)
-            print("Aux assignment: ", auxiliary.cur_assignment)
-            self.calc_solution()
-            if auxiliary.solution_type == self.BOUNDED and auxiliary.cur_assignment[0]:
-                self.solution_type = self.INFEASIBLE
-                return
-            # TODO postprocessing
+        self.aux_pivot_history = []
 
-        while True:
+    def run(self):
+       while True:
             B_inv = self.inv_B_by_etas()
+            # B_inv[np.abs(B_inv) < self.epsilon] = 0 # TODO delete
             entering_column_index = self.pick_entering_index(B_inv)
             if entering_column_index == self.NO_INDEX:
-                self.solution_type = self.BOUNDED
+                self.solution_type = BOUNDED
                 self.calc_solution()
                 return
             leaving_column_index, t, d = self.pick_leaving_index(B_inv, entering_column_index)
+            if self.is_aux:
+                self.aux_pivot_history.append((entering_column_index, leaving_column_index, t, d))
             if leaving_column_index == self.NO_INDEX:
-                self.solution_type = self.UNBOUNDED
+                self.solution_type = UNBOUNDED
                 return
             self.perform_pivot(entering_column_index, leaving_column_index, t, d)
 
@@ -81,6 +118,7 @@ class RevisedSimplexAlgorithm:
         :param d: d of this iteration
         :return:
         """
+
         enter_var = self.x_n[enter_idx]
         leave_var = self.x_b[leave_idx]
 
@@ -174,17 +212,32 @@ class RevisedSimplexAlgorithm:
         d = B_inv @ column
         ts = []
         for i in range(len(self.x_b_star)):
-            if not d[i]:
-                ts.append(np.inf)
+            if d[i] > 0:
+                ts.append(self.x_b_star[i] / d[i])
             else:
-                num = self.x_b_star[i] / d[i]
-                if num > 0 or not self.needs_aux:
-                    ts.append(num)
-        if not len(ts) or min(ts) == np.inf: # unbounded
+                ts.append(np.inf)
+        if np.min(ts) == np.inf:
             return self.NO_INDEX, 0, d
-        t = np.min(ts)
+        t = min(ts)
         leave_idx = np.argmin(ts)
         return leave_idx, t, d
+
+    def basis_dict(self):
+        return - np.linalg.inv(self.B) @ self.A_n
+
+    def eraseX0(self):
+        assert 0 in self.x_n
+        zero_idx = np.where(self.x_n==0)[0][0]
+        self.x_n = np.delete(self.x_n, zero_idx)
+        self.c_n = np.delete(self.c_n, zero_idx)
+        self.A_n = np.delete(self.A_n, zero_idx, axis=1)
+        self.x_n -= 1
+        self.x_b -= 1
+        self.cur_assignment = self.cur_assignment[1:]
+        # A_n, x_n, c_n, cur_assignment
+
+        # TODO update b with lu factorization, and empty etas
+
 
 if __name__ == '__main__':
 
@@ -194,7 +247,7 @@ if __name__ == '__main__':
     #               [2, 1, 3]])
     # b = np.array([4, 5, 7])
     # c = np.array([3, 2, 4])
-
+    #
     # lecture example
     # A = np.array([[3, 2, 1, 2],
     #               [1, 1, 1, 1],
@@ -202,31 +255,32 @@ if __name__ == '__main__':
     # b = np.array([225, 117, 420])
     # c = np.array([19, 13, 12, 17])
 
+    # unbounded
     # A = np.array([[2, 2, -1],
     #               [3, -2, 1],
     #               [1, -3, 1]])
     # b = np.array([10, 10, 10])
     # c = np.array([1, 3, -1])
 
-    A = np.array([[1, -1],
-                  [-1, -1],
-                  [2, 1]])
-    b = np.array([-1, -3, 4])
-    c = np.array([3, 1])
+    # A = np.array([[1, -1],
+    #               [-1, -1],
+    #               [2, 1]])
+    # b = np.array([-1, -3, 2])
+    # c = np.array([3, 1])
 
-    # A = np.array([[-1, +1],
-    #               [-2, -2],
-    #               [-1, 4]])
-    # b = np.array([-1, -6, 2])
-    # c = np.array([1, 3])
+    A = np.array([[-1, 1],
+                  [-2, -2],
+                  [-1, 4]])
+    b = np.array([-1, -6, 2])
+    c = np.array([1, 3])
 
 
     # print scipy-solver results
     res = linprog(c=-c, A_ub=A, b_ub=b)
     print(res)
 
-    rsa = RevisedSimplexAlgorithm(A, b, c, RevisedSimplexAlgorithm.BLAND)
+    rsa = LP_SOLVER(A, b, c, RevisedSimplexAlgorithm.BLAND)
     rsa.run()
-    print(rsa.cur_assignment)
-    print(rsa.cur_objective)
-    print(rsa.solution_type)
+    print("Final assignment:", rsa.mainLP.cur_assignment)
+    print("Objective value:", rsa.mainLP.cur_objective)
+    print("Sol type: ",rsa.mainLP.solution_type)
