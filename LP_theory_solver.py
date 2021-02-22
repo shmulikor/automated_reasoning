@@ -1,29 +1,39 @@
 import numpy as np
-from scipy.linalg import lu, solve_triangular
+from scipy.linalg import lu
 from scipy.optimize import linprog
 
-# TODO delete d,t from pivot function
-# TODO lu factorization
-# TODO num stab
 # TODO merge to SMT
 
 
-UNBOUNDED = 2
-INFEASIBLE = 1
-BOUNDED = 0
+UNBOUNDED = "Unbounded"
+INFEASIBLE = "Infeasible"
+BOUNDED = "Bounded"
+UNDECIDED = "Undecided"
+BLAND = "bland"
+DANTZIG = "dantzig"
+DEBUG_LP = True
 
+
+# Assumptions - input is hard coded as A,b,c that corresponds to a correct standard form LP instance
 
 class LP_SOLVER:
+    # A class representing an LP solver engine
+    # Handles LP problems of the standard form
+    # Wraps the RevisedSimplexAlgorithm class, in order to manage two instances,
+    # in case an auxiliary problem is needed
 
-
-    def __init__(self, A, b, c, rule, eta_threshold=10, epsilon=0.01):
+    def __init__(self, A, b, c, rule=BLAND, eta_threshold=5, epsilon=0.01):
         self.A = A
         self.b = b
         self.c = c
         self.rule = rule
         self.eta_threshold = eta_threshold
         self.epsilon = epsilon
+        self.objective = 0
+        self.assignment = np.zeros(len(c))
+        self.solution_type = UNDECIDED
 
+        # If needed, construct an auxiliary problem for the given one
         if any(b < 0):
             aux_A = np.hstack((np.array([-1] * len(b))[:, None], A))
             aux_c = np.array([-1] + [0] * len(c))
@@ -35,9 +45,12 @@ class LP_SOLVER:
             self.mainLP = RevisedSimplexAlgorithm(A, b, c, rule, eta_threshold, epsilon, False)
 
     def run(self):
+        # Runs the auxiliary problem first (in case it is needed), otherwise runs the main LP
+        # If auxiliary problem solution is not bounded with x0=0, original problem is infeasible
+        # If not so, use the pivot history of the auxiliary for the main LP as well
         if self.auxiliary:
             b = self.auxiliary.b
-            n = self.auxiliary.n
+            n = self.auxiliary.m
             min_idx = np.argmin(b)
             self.auxiliary.perform_pivot(0, min_idx, abs(min(b)), np.array([-1] * n))
             self.auxiliary.aux_pivot_history.append((0, min_idx, abs(min(b)), np.array([-1] * n)))
@@ -52,235 +65,323 @@ class LP_SOLVER:
             self.mainLP.eraseX0()
 
         self.mainLP.run()
+        self.objective = self.mainLP.cur_objective
+        self.assignment = self.mainLP.cur_assignment
+        self.solution_type = self.mainLP.solution_type
 
-class RevisedSimplexAlgorithm():
-    BLAND = "bland"
-    DANTZIG = "dantzig"
+
+class RevisedSimplexAlgorithm:
+    # A class responsible for implementation of the revised simplex algorithm
     NO_INDEX = -1
+    NUM_STAB_PERIOD = 10
 
-    def __init__(self, A, b, c, rule=DANTZIG, eta_threshold=100, epsilon=0.01, is_aux=True):
-        assert rule == self.BLAND or rule == self.DANTZIG
+    def __init__(self, A, b, c, rule=BLAND, eta_threshold=100, epsilon=0.01, is_aux=True):
+        assert rule == BLAND or rule == DANTZIG
         self.rule = rule
         self.epsilon = epsilon
         self.is_aux = is_aux
+        self.iterations_counter = 0
+        self.aux_pivot_history = []
 
         self.b = b
-        self.n = len(b)
+        self.m = len(b)
         self.A_n = A
 
         # init B and etas
-        self.B = np.identity(self.n)
+        self.B = np.identity(self.m)
         self.etas = []
         self.eta_threshold = eta_threshold
 
         # For lu factorization
-        self.p = np.identity(self.n)
-        self.l, self.u = None, None
+        self.p = np.identity(self.m)
 
         # init x
         self.x_n = np.arange(A.shape[1])
-        self.x_b = np.arange(A.shape[1], A.shape[1] + self.n)
+        self.x_b = np.arange(A.shape[1], A.shape[1] + self.m)
         self.x_b_star = b
 
         # init c
         self.c_n = c
-        self.c_b = np.zeros(self.n)
+        self.c_b = np.zeros(self.m)
 
-        self.cur_assignment = np.zeros(A.shape[1] + self.n)
+        self.cur_assignment = np.zeros(A.shape[1] + self.m)
         self.cur_objective = 0
-        self.solution_type = -1
-
-        self.aux_pivot_history = []
+        self.solution_type = UNDECIDED
 
     def run(self):
-       while True:
+        # Runs the algorithm
+        while True:
+            self.iterations_counter += 1
             B_inv = self.inv_B_by_etas()
-            # B_inv[np.abs(B_inv) < self.epsilon] = 0 # TODO delete
+
+            # For numerical stability reasons - TODO complete from Guy's answers
+            if self.iterations_counter == self.NUM_STAB_PERIOD:
+                self.iterations_counter = 0
+                if not np.allclose(self.B @ self.x_b_star, self.b, self.epsilon, self.epsilon):
+                    self.lu_factorization()
+
+            # Pick the entering variable
             entering_column_index = self.pick_entering_index(B_inv)
+            # If no variable found, conclude optimal solution
             if entering_column_index == self.NO_INDEX:
                 self.solution_type = BOUNDED
                 self.calc_solution()
                 return
+
+            # Pick the leaving variable
             leaving_column_index, t, d = self.pick_leaving_index(B_inv, entering_column_index)
+
+            # Record history for auxiliary problems, so the main problem can mimic it
             if self.is_aux:
                 self.aux_pivot_history.append((entering_column_index, leaving_column_index, t, d))
+
+            # If no t found for x*_b - td >= 0
             if leaving_column_index == self.NO_INDEX:
                 self.solution_type = UNBOUNDED
                 return
+
+            # Performs the pivot according to the indices, non-basic column d, and maximizer t
             self.perform_pivot(entering_column_index, leaving_column_index, t, d)
 
     def perform_pivot(self, enter_idx, leave_idx, t, d):
-        """
-        update all the parameters of the algorithm
-        :param enter_idx: index of the enter var
-        :param leave_idx: index of the leave var
-        :param t: t of this iteration
-        :param d: d of this iteration
-        :return:
-        """
+        # Update all parameters of the algorithm according to the pivot specified
 
+        # Retrieve variables indices
         enter_var = self.x_n[enter_idx]
         leave_var = self.x_b[leave_idx]
 
-        # swap A_n, B columns
+        # Swap A_n, B columns
         tmp = self.A_n[:, enter_idx].copy()
         self.A_n[:, enter_idx] = self.B[:, leave_idx]
         self.B[:, leave_idx] = tmp
 
-        # update x
+        # Update x
         self.x_b_star = self.x_b_star - t * d
         self.x_b_star[leave_idx] = t
         self.x_b[leave_idx] = enter_var
         self.x_n[enter_idx] = leave_var
 
-        # swap c vals
+        # Swap c vals
         tmp = self.c_n[enter_idx].copy()
         self.c_n[enter_idx] = self.c_b[leave_idx]
         self.c_b[leave_idx] = tmp
 
-        # add eta
-        eta = np.identity(self.n)
-        if len(self.etas) >= self.eta_threshold:  # check if lu factorization is needed
-            self.p, self.l, self.u = lu(self.B)
-            self.etas = []
+        # Add eta
+        eta = np.identity(self.m)
         eta[:, leave_idx] = d
-        if not np.all(eta == np.eye(self.n)):
+        if not np.all(eta == np.identity(self.m)):
             self.etas.append(eta)
 
+        # Refactor if needed
+        if len(self.etas) >= self.eta_threshold:
+            self.lu_factorization()
 
     def calc_solution(self):
-        """
-        calc the solution of the optimization problem
-        :return:
-        """
+        # Calculate the solution of the optimization problem, according to current assignment
+
         self.cur_assignment[self.x_b] = self.x_b_star  # update the current assignment of all vars
         self.cur_objective = self.c_b @ self.x_b_star  # calc the current objective value
 
     def inv_B_by_etas(self):
-        """
-        use Eta matrices for inverting B
-        :return: the inverse of B
-        """
-        use_lu = False if self.l is None else True  # if there is a saved l matrix - need to use lu factorization
-        B_inv = np.identity(self.n)
+        # Use Eta matrices for inverting B
+
+        B_inv = np.identity(self.m)
         for eta in self.etas[::-1]:
             eta_inv = self.inv_eta(eta)
             B_inv = B_inv @ eta_inv
-        if use_lu:
-            B_inv = B_inv @ solve_triangular(self.u, np.identity(self.n)) @ \
-                    solve_triangular(self.l, np.identity(self.n), lower=True) @ self.p.T
-            """
-            In contrary to what is written in the powerpoint file, triangular matrices are not eta matrices. It is 
-            possible to fix the inv_eta function for this case, but I used the solve_triangular instead, which I believe
-            is more efficient than the simple inv function. In addition, I used inv for the p matrix, which is only a 
-            permutation matrix. Need to make some decisions on this part. 
-            However, algorithmically, the code returns the expected results.  
-            """
+        B_inv = B_inv @ self.p.T  # Permutation matrix is orthogonal
         return B_inv
 
     def inv_eta(self, eta):
-        """
-        inv the given Eta matrix, based on the algorithm we saw in class
-        :param eta:
-        :return: the inverse of eta
-        """
-        eta = eta.astype(float)
+        # Invert a given Eta matrix, based on the algorithm we saw in class
+        if np.all(eta == np.identity(self.m)):
+            return eta
 
-        # find the column where eta is different from the identity matrix
-        special_column_idx = np.where(eta - np.identity(self.n))[1][0]
+        inv_eta = eta.astype(float)
 
-        # mark all rows, except of the special one
-        mask = np.ones(self.n, bool)
+        # Find the column where eta is different from the identity matrix
+        special_column_idx = np.where(eta - np.identity(self.m))[1][0]
+
+        # Mark all rows, except of the special one
+        mask = np.ones(self.m, bool)
         mask[special_column_idx] = False
 
-        # invert, negate and divide the special column
-        eta[special_column_idx, special_column_idx] = 1 / eta[special_column_idx, special_column_idx]
-        eta[mask, special_column_idx] = -eta[mask, special_column_idx]
-        eta[mask, special_column_idx] *= eta[special_column_idx, special_column_idx]
-        return eta
+        # Invert, negate and divide the special column
+        inv_eta[special_column_idx, special_column_idx] = 1 / inv_eta[special_column_idx, special_column_idx]
+        inv_eta[mask, special_column_idx] = -inv_eta[mask, special_column_idx]
+        inv_eta[mask, special_column_idx] *= inv_eta[special_column_idx, special_column_idx]
+
+        return inv_eta
 
     def pick_entering_index(self, B_inv):
+        # Picks the index of the variable entering the basis
+        # according to the rule specified by self.rule
+
         y = self.c_b @ B_inv
         z_coeff = self.c_n - y @ self.A_n
 
+        # For numerical stability - don't pick a rounded positive
         if np.max(z_coeff) > self.epsilon:
-            return np.where(z_coeff > self.epsilon)[0][0] if self.rule == self.BLAND else np.argmax(z_coeff)
+            return np.where(z_coeff > self.epsilon)[0][0] if self.rule == BLAND else np.argmax(z_coeff)
         return self.NO_INDEX
 
     def pick_leaving_index(self, B_inv, enter_idx):
+        # Picks the index of the variable leaving the basis
+
         column = self.A_n[:, enter_idx]
         d = B_inv @ column
+
+        # Pick maximal t such that x*_b - td >= 0, if exists
         ts = []
         for i in range(len(self.x_b_star)):
             if d[i] > 0:
                 ts.append(self.x_b_star[i] / d[i])
             else:
                 ts.append(np.inf)
+
+        # No such t exists, can conclude problem is unbounded
         if np.min(ts) == np.inf:
             return self.NO_INDEX, 0, d
+
+        # Finds the maximal t (minimal -t)
         t = min(ts)
         leave_idx = np.argmin(ts)
         return leave_idx, t, d
 
-    def basis_dict(self):
-        return - np.linalg.inv(self.B) @ self.A_n
-
     def eraseX0(self):
-        assert 0 in self.x_n
-        zero_idx = np.where(self.x_n==0)[0][0]
+        # After creating the dictionary of the auxiliary problem
+        # Remove auxiliary variable x0 from all parameters
+        assert 0 in self.x_n and not self.is_aux
+        zero_idx = np.where(self.x_n == 0)[0][0]
         self.x_n = np.delete(self.x_n, zero_idx)
         self.c_n = np.delete(self.c_n, zero_idx)
         self.A_n = np.delete(self.A_n, zero_idx, axis=1)
-        self.x_n -= 1
+        self.x_n -= 1  # Update other variables indices
         self.x_b -= 1
         self.cur_assignment = self.cur_assignment[1:]
-        # A_n, x_n, c_n, cur_assignment
 
-        # TODO update b with lu factorization, and empty etas
+    def lu_factorization(self):
+        # Factorises the basis
+
+        self.etas = []
+
+        if DEBUG_LP:
+            prev_B = self.B.copy()
+
+        # l, u are triangular matrices
+        # keep p for further inverse calculations (p is orthogonal, thus inv = transpose)
+        self.p, l, u = lu(self.B, permute_l=False)
+
+        # Decompose l, u to eta matrices
+        for i in range(l.shape[0]):
+            temp_eta = np.identity(self.m)
+            temp_eta[:, i] = l[:, i]
+            self.etas.append(temp_eta)
+
+        for i in range(u.shape[0])[::-1]:
+            temp_eta = np.identity(self.m)
+            temp_eta[:, i] = u[:, i]
+            self.etas.append(temp_eta)
+
+        if DEBUG_LP:
+            check = np.identity(self.m)
+            for eta in self.etas:
+                check = check @ eta
+
+            assert np.allclose(check, l @ u)
+            assert np.allclose(self.p @ check, prev_B)
+
+
+def examples():
+    # returns a list of hard coded examples
+    # each example is of the form tuple(A, b,c)
+    return [
+        (np.array([[1, 1, 2],
+                   [2, 0, 3],
+                   [2, 1, 3]]),
+         np.array([4, 5, 7]),
+         np.array([3, 2, 4])),
+
+        (np.array([[3, 2, 1, 2],
+                   [1, 1, 1, 1],
+                   [4, 3, 3, 4]]),
+         np.array([225, 117, 420]),
+         np.array([19, 13, 12, 17])),
+
+        (np.array([[2, 2, -1],
+                   [3, -2, 1],
+                   [1, -3, 1]]),
+         np.array([10, 10, 10]),
+         np.array([1, 3, -1])),
+
+        (np.array([[1, -1],
+                   [-1, -1],
+                   [2, 1]]),
+         np.array([-1, -3, 4]),
+         np.array([3, 1])),
+
+        (np.array([[1, -1],
+                   [-1, -1],
+                   [2, 1]]),
+         np.array([-1, -3, 2]),
+         np.array([3, 1])),
+
+        (np.array([[1, -1],
+                   [-1, -1],
+                   [2, -1]]),
+         np.array([-1, -3, 2]),
+         np.array([3, 1])),
+
+        (np.array([[-1, 1],
+                   [-2, -2],
+                   [-1, 4]]),
+         np.array([-1, -6, 2]),
+         np.array([1, 3])
+         ),
+
+        (np.array([[1, 2, 3, 1],
+                   [1, 1, 2, 3]]),
+         np.array([5, 3]),
+         np.array([5, 6, 9, 8])),
+
+        (np.array([[2, 3],
+                   [1, 5],
+                   [2, 1],
+                   [4, 1]]),
+         np.array([3, 1, 4, 5]),
+         np.array([2, 1])),
+
+        (np.array([[1, -2],
+                   [1, -1],
+                   [2, -1],
+                   [1, 0],
+                   [2, 1],
+                   [1, 1],
+                   [1, 2],
+                   [0, 1], ]),
+         np.array([1, 2, 6, 5, 16, 12, 21, 10]),
+         np.array([3, 2])),
+
+        # Klee minty
+        (np.array([[1, 0, 0],
+                   [20, 1, 0],
+                   [200, 20, 1]]),
+         np.array([1, 100, 10000]),
+         np.array([100, 10, 1])),
+    ]
 
 
 if __name__ == '__main__':
+    for A, b, c in examples():
 
-    # ex3 q2 example
-    # A = np.array([[1, 1, 2],
-    #               [2, 0, 3],
-    #               [2, 1, 3]])
-    # b = np.array([4, 5, 7])
-    # c = np.array([3, 2, 4])
-    #
-    # lecture example
-    # A = np.array([[3, 2, 1, 2],
-    #               [1, 1, 1, 1],
-    #               [4, 3, 3, 4]])
-    # b = np.array([225, 117, 420])
-    # c = np.array([19, 13, 12, 17])
+        print(f"Solving: max <{c}, x> s.t\n {A}x<={b}")
+        # Print scipy-solver results for comparison
+        res = linprog(c=-c, A_ub=A, b_ub=b)  # Solves min -c problem, need to negate results
+        print(f"Scipy solver result status: {res['message']}\nObjective value {-res['fun']}")
 
-    # unbounded
-    # A = np.array([[2, 2, -1],
-    #               [3, -2, 1],
-    #               [1, -3, 1]])
-    # b = np.array([10, 10, 10])
-    # c = np.array([1, 3, -1])
-
-    # A = np.array([[1, -1],
-    #               [-1, -1],
-    #               [2, 1]])
-    # b = np.array([-1, -3, 2])
-    # c = np.array([3, 1])
-
-    A = np.array([[-1, 1],
-                  [-2, -2],
-                  [-1, 4]])
-    b = np.array([-1, -6, 2])
-    c = np.array([1, 3])
-
-
-    # print scipy-solver results
-    res = linprog(c=-c, A_ub=A, b_ub=b)
-    print(res)
-
-    rsa = LP_SOLVER(A, b, c, RevisedSimplexAlgorithm.BLAND)
-    rsa.run()
-    print("Final assignment:", rsa.mainLP.cur_assignment)
-    print("Objective value:", rsa.mainLP.cur_objective)
-    print("Sol type: ",rsa.mainLP.solution_type)
+        lp_solver = LP_SOLVER(A, b, c, BLAND)
+        lp_solver.run()
+        print("Final assignment:", lp_solver.assignment)
+        print("Objective value:", lp_solver.objective)
+        print("Sol type: ", lp_solver.solution_type)
+        print("####################################")

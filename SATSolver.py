@@ -12,14 +12,14 @@ DRAW_IMP_GRAPH = False
 CHECK_SAT = True
 
 
-# Assumption - var numbers are given in continuous manner
+# TODO - return assignment to original form and not to tseitin form
 
 class SATSolver:
     # A class representing the SAT solver for the first part of the project
     # The class handles a formula in cnf form (in our convention - list of lists of numbers)
     # and solves the corresponding SAT problem
 
-    def __init__(self, cnf):
+    def __init__(self, cnf, is_cnf=True):
         self.cnf = cnf
         self.variables_num = len(set(chain(*[np.abs(c) for c in self.cnf])))
         self.var_assignment = {}
