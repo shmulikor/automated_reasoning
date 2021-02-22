@@ -12,18 +12,24 @@ DRAW_IMP_GRAPH = False
 CHECK_SAT = True
 
 
-# TODO - return assignment to original form and not to tseitin form
+# Assumptions - input is either a hard-coded Boolean Operator (first system argument is 0) formula or a cnf file
+
 
 class SATSolver:
     # A class representing the SAT solver for the first part of the project
     # The class handles a formula in cnf form (in our convention - list of lists of numbers)
     # and solves the corresponding SAT problem
 
-    def __init__(self, cnf, is_cnf=True):
-        self.cnf = cnf
+    def __init__(self, formula, is_cnf=True):
+        if is_cnf:
+            self.cnf = formula
+            self.formula_processor = None
+        else:
+            self.formula_processor = FormulaProcessor(formula)
+            self.cnf = self.formula_processor.convert_and_preprocess()
         self.variables_num = len(set(chain(*[np.abs(c) for c in self.cnf])))
         self.var_assignment = {}
-        self.assigned_clauses = [False] * len(cnf)
+        self.assigned_clauses = [False] * len(self.cnf)
         self.decision_levels = {}
         self.splits = []
         self.current_decision_level = 0
@@ -65,7 +71,16 @@ class SATSolver:
             elif has_conflict:
                 if not self.resolve_conflict():
                     return False, []
-        return True, self.var_assignment
+        # If original formula was a boolean operator, return a dictionary of assignment for original atomic only
+        # Otherwise, return the regular assignment
+        assignment = self.var_assignment if not self.formula_processor else self.get_atomic_assignments()
+        return True, assignment
+
+    def get_atomic_assignments(self):
+        # TODO documentation
+        return {self.formula_processor.atomic_abstractions[atomic]: self.var_assignment[atomic] for atomic in \
+          self.formula_processor.atomic_abstractions.keys()}
+
 
     def should_continue(self):
         return (not all(self.assigned_clauses)) or len(self.var_assignment.keys()) != self.variables_num or \
@@ -358,7 +373,10 @@ def run_cnf_files(directory):
                 print("Solving: ", os.path.join(directory, file))
                 solution = SATSolver(cnf)
                 if CHECK_SAT:
-                    assert (solution.solve()[0])
+                    result, assignment = solution.solve()
+                    assert (result)
+                    if DEBUG:
+                        print(assignment)
                 else:
                     assert (not solution.solve()[0])
                 completed += 1
@@ -371,9 +389,8 @@ def run_cnf_files(directory):
 if __name__ == '__main__':
     if len(sys.argv) and sys.argv[1] == "0":  # Toggle between hard-coded formula and reading from CNF files
         formula = Not(Imp(Not(And(Atomic('p'), Atomic('q'))), Not(Atomic('r'))))
-        f2cnf = FormulaProcessor(formula)
-        f2cnf.convert_and_preprocess()
-        print(SATSolver(f2cnf.cnf).solve())
+        result, assignment = SATSolver(formula, False).solve()
+        print(assignment)
     else:
         directory = "SAT_examples" if CHECK_SAT else "UNSAT_examples"
         run_cnf_files(directory)

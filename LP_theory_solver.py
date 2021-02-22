@@ -16,7 +16,7 @@ DEBUG_LP = True
 
 # Assumptions - input is hard coded as A,b,c that corresponds to a correct standard form LP instance
 
-class LP_SOLVER:
+class LPSolver:
     # A class representing an LP solver engine
     # Handles LP problems of the standard form
     # Wraps the RevisedSimplexAlgorithm class, in order to manage two instances,
@@ -379,7 +379,7 @@ if __name__ == '__main__':
         res = linprog(c=-c, A_ub=A, b_ub=b)  # Solves min -c problem, need to negate results
         print(f"Scipy solver result status: {res['message']}\nObjective value {-res['fun']}")
 
-        lp_solver = LP_SOLVER(A, b, c, BLAND)
+        lp_solver = LPSolver(A, b, c, BLAND)
         lp_solver.run()
         print("Final assignment:", lp_solver.assignment)
         print("Objective value:", lp_solver.objective)

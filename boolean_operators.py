@@ -30,6 +30,9 @@ class And(BooleanOperator):
         if DEBUG:
             print(f"{self.name}: {self.left.name} and {self.right.name}")
 
+    def __repr__(self):
+        return f"({self.left.__repr__()} and {self.right.__repr__()})"
+
 
 class Or(BooleanOperator):
     # A class representing the Or boolean operator
@@ -40,6 +43,9 @@ class Or(BooleanOperator):
         self.right = right
         if DEBUG:
             print(f"{self.name}: {self.left.name} or {self.right.name}")
+
+    def __repr__(self):
+        return f"({self.left.__repr__()} or {self.right.__repr__()})"
 
 
 class Not(BooleanOperator):
@@ -54,6 +60,9 @@ class Not(BooleanOperator):
         if DEBUG:
             print(f"{self.name}: not {self.param.name}")
 
+    def __repr__(self):
+        return f"not({self.param.__repr__()})"
+
 
 class Imp(BooleanOperator):
     # A class representing the Implication boolean operator
@@ -65,6 +74,8 @@ class Imp(BooleanOperator):
         if DEBUG:
            print(f"{self.name}: {self.left.name} -> {self.right.name}")
 
+    def __repr__(self):
+        return f"({self.left.__repr__()} -> {self.right.__repr__()})"
 
 class Equiv(BooleanOperator):
     # A class representing the Equivalence boolean operator
@@ -76,6 +87,8 @@ class Equiv(BooleanOperator):
         if DEBUG:
             print(f"{self.name}: {self.left.name} <-> {self.right.name}")
 
+    def __repr__(self):
+        return f"({self.left.__repr__()} <=> {self.right.__repr__()})"
 
 class Atomic(BooleanOperator):
     # A class representing an Atomic proposition
@@ -89,6 +102,9 @@ class Atomic(BooleanOperator):
         self.val = name
         if DEBUG:
             print(f"{self.name}: {self.val}")
+
+    def __repr__(self):
+        return self.val
 
 
 # A class responsible for converting a general formula to CNF
@@ -154,3 +170,4 @@ class FormulaProcessor:
         # Converts formula to Tseitin form and preprocesses it
         self.cnf = self.tseitin()
         self.cnf = self.preprocessing()
+        return self.cnf
