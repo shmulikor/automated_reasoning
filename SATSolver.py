@@ -1,17 +1,11 @@
-import sys
 from collections import defaultdict
-from boolean_operators import *
-
+from formula_processor import *
 import networkx as nx
 import matplotlib.pyplot as plt
-import os
 from itertools import chain
 
 CONFLICT_NODE = 0
 DRAW_IMP_GRAPH = False
-CHECK_SAT = True
-
-
 # Assumptions - input is either a hard-coded Boolean Operator (first system argument is 0) formula or a cnf file
 
 
@@ -26,7 +20,7 @@ class SATSolver:
             self.formula_processor = None
         else:
             self.formula_processor = FormulaProcessor(formula)
-            self.cnf = self.formula_processor.convert_and_preprocess()
+            self.cnf = self.formula_processor.tseitin_convert_and_preprocess()
         self.variables_num = len(set(chain(*[np.abs(c) for c in self.cnf])))
         self.var_assignment = {}
         self.assigned_clauses = [False] * len(self.cnf)
@@ -77,14 +71,19 @@ class SATSolver:
         return True, assignment
 
     def get_atomic_assignments(self):
-        # TODO documentation
-        return {self.formula_processor.atomic_abstractions[atomic]: self.var_assignment[atomic] for atomic in \
-          self.formula_processor.atomic_abstractions.keys()}
-
+        # Return assignments for all atomic variables.
+        # If formula was given as cnf - all variables are atomics
+        # Otherwise, return assignments for variables corresponding to atomics in given formula
+        if self.formula_processor is None:
+            return self.var_assignment
+        return {self.formula_processor.atomic_abstractions[atomic]: self.var_assignment[atomic] for atomic in
+                self.formula_processor.atomic_abstractions.keys()}
 
     def should_continue(self):
+        # Return True if main loop should continue, i.e. there is an unassigned clause
+        # or there is an unassigned variable or there is a falsified clause
         return (not all(self.assigned_clauses)) or len(self.var_assignment.keys()) != self.variables_num or \
-                                                     self.has_false_clause()
+               self.has_false_clause()
 
     def resolve_conflict(self):
         # Resolves the conflict in the assignment, assuming there is one
@@ -352,45 +351,3 @@ def boolean_res(clause1, clause2):
             part2.remove(-lit)
             return list(part1.union(part2))
     return None
-
-
-def run_cnf_files(directory):
-    # Parses cnf files into our formula convention, and solves the sat problem they describe
-    files = os.listdir(directory)
-    errors = 0
-    completed = 0
-    for file in files:
-        try:
-            with open(os.path.join(directory, file)) as formula_file:
-                cnf = []
-                for line in formula_file.readlines():
-                    if len(line.strip()) and (not line.strip()[0].isalpha() and not line.strip()[0] == '%'):
-                        to_add = [int(num) for num in line.split()]
-                        if to_add[-1] == 0:
-                            to_add.pop()
-                        if len(to_add):
-                            cnf.append(to_add)
-                print("Solving: ", os.path.join(directory, file))
-                solution = SATSolver(cnf)
-                if CHECK_SAT:
-                    result, assignment = solution.solve()
-                    assert (result)
-                    if DEBUG:
-                        print(assignment)
-                else:
-                    assert (not solution.solve()[0])
-                completed += 1
-        except UnicodeDecodeError:
-            errors += 1
-            continue
-    print("Checked ", completed, " files\n", errors, " files were not checked due to decoding errors")
-
-
-if __name__ == '__main__':
-    if len(sys.argv) and sys.argv[1] == "0":  # Toggle between hard-coded formula and reading from CNF files
-        formula = Not(Imp(Not(And(Atomic('p'), Atomic('q'))), Not(Atomic('r'))))
-        result, assignment = SATSolver(formula, False).solve()
-        print(assignment)
-    else:
-        directory = "SAT_examples" if CHECK_SAT else "UNSAT_examples"
-        run_cnf_files(directory)

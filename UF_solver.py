@@ -50,7 +50,7 @@ class UFSolver:
     def convert_raw_to_cnf(self, raw_formula):
         # Converts the raw formula to cnf form using Tsietin transformation
         processor = FormulaProcessor(raw_formula)
-        processor.convert_and_preprocess()
+        processor.tseitin_convert_and_preprocess()
         self.boolean_formula = processor.cnf
         self.boolean_abstraction = processor.atomic_abstractions
         self.inv_boolean_abstraction = {v: k for k, v in self.boolean_abstraction.items()}
@@ -297,38 +297,3 @@ class UFSolver:
                     propagation_counter += 1
 
         return propagation_counter > 0
-
-
-if __name__ == '__main__':
-    examples = [
-        Or(And(Atomic("f(a)=f(b)"), Atomic("b=c")), Atomic('g(a,f(a,k(b),f(c)))=d')),  # True
-        Atomic("f(f(a,b),a)=f(c,d)"),  # True
-        And(Atomic("a=b"), And(Or(Or(Not(Atomic("a=b")), Not(Atomic("s=t"))), Atomic("b=c")),
-                               And(Or(Or(Atomic("s=t"), Not(Atomic("t=r"))), Atomic("f(s)=f(t)")),
-                                   And(Or(Or(Not(Atomic("b=c")), Not(Atomic("t=r"))), Atomic("f(s)=f(a)")),
-                                       Or(Not(Atomic("f(s)=f(a)")), Not(Atomic("f(a)=f(c)"))))))),  # True
-        And(Atomic("f(g(x))=g(f(x))"), And(Atomic("f(g(f(y)))=x"), And(Atomic("f(y)=x"),
-                                                                       Not(Atomic("g(f(x))=x"))))),  # False
-        And(Atomic("a=b"), And(Atomic("b=c"), Or(Atomic("d=e"), Or(Atomic("a=c"), Atomic("f=g"))))),  # True
-        And(Atomic("g(a)=c"), And(Or(Not(Atomic("f(g(a))=f(c)")), Atomic("g(a)=d")), Not(Atomic("c=d")))),  # False
-        And(Or(Atomic("g(a)=c"), Atomic("x=y")), And(Or(Not(Atomic("f(g(a))=f(c)")), Atomic("g(a)=d")),
-                                                     And(Not(Atomic("c=d")), Not(Atomic("f(x)=f(y)"))))),  # False
-        And(Not(Atomic("x=y")), Atomic("f(x)=f(y)")),  # True
-        And(Atomic("f(a)=a"), Not(Atomic("f(f(a))=a"))),  # False
-        And(Atomic("f(f(f(a)))=a"), And(Atomic("f(f(f(f(f(a)))))=a"), Not(Atomic("f(a)=a")))),  # False
-        Or(Not(Atomic("x=g(y,z)")), Atomic("f(x)=f(g(y,z))")),  # True
-        And(Atomic("a=b"), And(Atomic("f(c)=c"), Atomic("f(a)=b"))),  # True
-        And(Atomic("f(a,b)=a"), Not(Atomic("f(f(a,b),b)=a"))),  # False
-        And(Not(Atomic("s=x")), And(Atomic("g(f(z))=s"), And(Atomic("g(f(y))=x"), Atomic("y=z")))),  # False
-        And(Or(Atomic("f(x)=f(y)"), Atomic("a=b")), Atomic("x=y")),  # True
-        And(Not(Atomic("f(x)=f(y)")), And(Atomic("y=x"), Atomic("a=b"))),  # False
-        And(Not(Atomic("f(f(x))=f(f(y))")), And(Atomic("f(x)=f(y)"), Atomic("x=y")))  # False
-    ]
-
-    desired_results = [True, True, True, False, True, False, False, True, False, False, True, True, False, False, True,
-                       False, False]
-
-    for i in range(len(examples)):
-        uf = UFSolver(examples[i])
-        print(uf.boolean_abstraction)
-        assert (uf.solve()[0] == desired_results[i])

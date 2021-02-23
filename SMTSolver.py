@@ -1,180 +1,264 @@
-from boolean_operators import *
+import sys
+from scipy.optimize import linprog
+from formula_processor import *
 from UF_solver import UFSolver
 from LP_theory_solver import LPSolver
+from SATSolver import SATSolver
+import os
 
-GEQ = ">="
-LEQ = "<="
-EQ = "="
-NEQ = "!="
-LT = "<"
-GT = ">"
-PLUS = "+"
-MINUS = "-"
-PLACE_HOLDER = "?"
-UNUSED_VAR = "v"
+# TODO complete assumptions including objective function and other theories
+
+# The main module for the project, which calls all other modules (and tests them)
+# Testing is hardcoded in specified functions
+
+# For all parts - Input is assumed to be a BooleanOperator formula, with atomics carrying a string
+# With theory signature (or anything in case of propositional theory).
+
+# SAT Assumption - input can be parsed from a cnf file, without first converted to formula
+# (and without applying Tseitin transformation).
+# BooleanOperator formula is converted using Tseitin transformation
+
+# UF assumption - all atomics are of equality form, inequality is expressed using the Not class
+# Atomic string are syntactically correct and accurate, with all function in their right arity
+
+# LP assumptions:
+# Atomics have tq formulas as their strings
+# Input adheres the standard form, with correct dimensions of input objects
+# (all variables are assumed to be >= 0)
+# so no strict inequalities appear
+# No variable named v in the formula - as it is used for conversion
+# Variables names don't contain numbers (e.g. no x0)
+# All relevant variables are included in all clauses, with the same order
+# All coefficients are stated explicitly (including +-1, 0)
+# Unless inserted as an argument, objective function is the all-ones vector
 
 
-# Assumption - no variable named v in the formula
-# TODO document and make pretty
+supported_theories = ['boolean', 'uf', 'lp']
+
 
 class SMTSolver:
-    supported_theories = ['uf', 'lp']
+    # A class representing a SMT solver, which supports theories corresponding to each
+    # part of the project - pure boolean, uninterpreted functions, and lp
+    # Class assumes correct input, as described above and does not support non-boolean theory combinations
 
-    def __init__(self, raw_formula: BooleanOperator, theory='uf'):
-        assert theory in self.supported_theories
+    def __init__(self, raw_formula, theory='boolean', lp_objective=None, boolean_is_cnf=True):
+        assert theory in supported_theories
         self.formula = raw_formula
-        self.solvers = []
+        self.solvers = []  # Might need several solvers in case of LP
+        self.processor = FormulaProcessor(raw_formula)
         if theory == 'uf':
             self.solvers.append(UFSolver(self.formula))
         elif theory == 'lp':
-            # convert to dnf
-            # for clause in dnf, init lp solver
-            pass
+            dnf = self.processor.process_q_formula()
+            for clause in dnf:
+                A, b = self.processor.convert_clause_to_lp(clause)
+                c = np.array(A.shape[1] * [1]) if lp_objective is None else lp_objective
+                self.solvers.append(LPSolver(A, b, c))
+        elif theory == 'boolean':
+            self.solvers.append(SATSolver(raw_formula, boolean_is_cnf))
 
     def solve(self):
+        # Decides satisfiability of the formula using the theory solvers
         for solver in self.solvers:
             is_sat, assignment = solver.solve()
             if is_sat:
                 return is_sat, assignment
         return False, {}
 
-    def process_q_formula(self, formula):
-        nnf = self.run_to_saturation(formula, self.nnf_helper)
-        rewrited_nnf = self.rewrite_q_atomics(nnf)
-        nnf = self.run_to_saturation(rewrited_nnf, self.nnf_helper)
-        dnf_bool_op = self.run_to_saturation(nnf, self.distribute)
-        dnf = self.convert_bool_dnf(dnf_bool_op)
-        return dnf
 
-    def distribute(self, formula):
-        if type(formula) == Atomic:
-            return formula
-        elif type(formula) == Not:
-            return Not(self.distribute(formula.param))
-        elif type(formula) == Or:
-            return Or(self.distribute(formula.left), self.distribute(formula.right))
-        elif type(formula) == Imp:
-            return Imp(self.distribute(formula.left), self.distribute(formula.right))
-        elif type(formula) == Equiv:
-            return Equiv(self.distribute(formula.left), self.distribute(formula.right))
-        elif type(formula) == And:
-            if type(formula.left) == Or:
-                a = formula.left.left
-                b = formula.left.right
-                c = formula.right
-                return self.distribute(Or(And(a, c), And(b, c)))
-            elif type(formula.right) == Or:
-                a = formula.left
-                b = formula.right.left
-                c = formula.right.right
-                return self.distribute(Or(And(a, b), And(a, c)))
-            else:
-                return And(self.distribute(formula.left), self.distribute(formula.right))
-        return formula
+def SAT_solver_test(check_sat=False, hardcoded=False):
+    # Runs tests for SAT solver
+    # Using a hardcoded formula or reads from cnf files
+    if hardcoded:
+        formula = Not(Imp(Not(And(Atomic('p'), Atomic('q'))), Not(Atomic('r'))))
+        result, assignment = SMTSolver(formula, "boolean", boolean_is_cnf=False).solve()
+        print(assignment)
+    else:
+        directory = "SAT_examples" if check_sat else "UNSAT_examples"
+        run_cnf_files(directory, check_sat)
 
-    def rewrite_q_atomics(self, formula):
-        if type(formula) == Atomic:
-            expr = str(formula)
-            if GEQ in expr:
-                return Atomic(self.invert_geq_atomic(expr))
-            elif NEQ in expr:
-                left_formula = self.rewrite_q_atomics(Atomic(expr.replace(NEQ, LT)))
-                right_expr = self.invert_geq_atomic(expr.replace(NEQ, GEQ))
-                i = right_expr.index(LEQ)
-                right_expr = right_expr[:i] + PLUS + UNUSED_VAR + LEQ + right_expr[i + 2:]
-                return Or(left_formula, And(Atomic(right_expr), Atomic(UNUSED_VAR + GT + "0")))
-            elif EQ in expr:
-                return And(Atomic(expr.replace(EQ, LEQ)), Atomic(self.invert_geq_atomic(expr.replace(EQ, GEQ))))
-            elif LT in expr:
-                i = expr.index(LT)
-                expr = expr[:i] + PLUS + UNUSED_VAR + LEQ + expr[i + 1:]
-                return And(Atomic(expr), Atomic(UNUSED_VAR + GT + "0"))
-            return formula
-        elif type(formula) == Not:
-            return Not(self.rewrite_q_atomics(formula.param))
-        elif type(formula) == And:
-            return And(self.rewrite_q_atomics(formula.left), self.rewrite_q_atomics(formula.right))
-        elif type(formula) == Or:
-            return Or(self.rewrite_q_atomics(formula.left), self.rewrite_q_atomics(formula.right))
-        elif type(formula) == Imp:
-            return Imp(self.rewrite_q_atomics(formula.left), self.rewrite_q_atomics(formula.right))
-        elif type(formula) == Equiv:
-            return Equiv(self.rewrite_q_atomics(formula.left), self.rewrite_q_atomics(formula.right))
-        else:
-            return formula
 
-    def invert_geq_atomic(self, expr):
-        assert GEQ in expr
-        expr = expr.replace(PLUS, PLACE_HOLDER)
-        expr = expr.replace(MINUS, PLUS)
-        expr = expr.replace(PLACE_HOLDER, MINUS)
-        if expr[0] == PLUS:
-            expr = expr[1:]
-        else:
-            expr = MINUS + expr
-        i = expr.index(GEQ) + 2
-        if expr[i] == PLUS:
-            expr = expr[:i] + expr[i + 1:]
-        else:
-            expr = expr[:i] + MINUS + expr[i:]
-        return expr.replace(GEQ, LEQ)
+def run_cnf_files(directory, check_sat):
+    # Parses cnf files into our formula convention, and solves the sat problem they describe
+    files = os.listdir(directory)
+    errors = 0
+    completed = 0
+    for file in files:
+        try:
+            with open(os.path.join(directory, file)) as formula_file:
+                cnf = []
+                for line in formula_file.readlines():
+                    if len(line.strip()) and (not line.strip()[0].isalpha() and not line.strip()[0] == '%'):
+                        to_add = [int(num) for num in line.split()]
+                        if to_add[-1] == 0:
+                            to_add.pop()
+                        if len(to_add):
+                            cnf.append(to_add)
+                print("Solving: ", os.path.join(directory, file))
+                solution = SMTSolver(cnf, "boolean", boolean_is_cnf=True)
+                if check_sat:
+                    result, assignment = solution.solve()
+                    assert result
+                    if DEBUG:
+                        print(assignment)
+                else:
+                    assert (not solution.solve()[0])
+                completed += 1
+        except UnicodeDecodeError:
+            errors += 1
+            continue
+    print("Checked ", completed, " files\n", errors, " files were not checked due to decoding errors")
 
-    def run_to_saturation(self, formula, func):
-        to_continue = True
-        new = formula
-        prev = None
-        while to_continue:
-            prev = new
-            new = func(prev)
-            if str(new) == str(prev):
-                to_continue = False
-        return prev
 
-    def nnf_helper(self, formula):
-        if type(formula) == Atomic:
-            return formula
-        elif type(formula) == And:
-            return And(self.nnf_helper(formula.left), self.nnf_helper(formula.right))
-        elif type(formula) == Or:
-            return Or(self.nnf_helper(formula.left), self.nnf_helper(formula.right))
-        elif type(formula) == Imp:
-            return self.nnf_helper(Or(Not(formula.left), formula.right))
-        elif type(formula) == Equiv:
-            return self.nnf_helper(And(Or(Not(formula.left), formula.right), Or(Not(formula.right), formula.left)))
-        elif type(formula) == Not:
-            if type(formula.param) == Not:
-                return self.nnf_helper(self.nnf_helper(formula.param.param))
-            elif type(formula.param) == And:
-                return self.nnf_helper(Or(Not(formula.param.left), Not(formula.param.right)))
-            elif type(formula.param) == Or:
-                return self.nnf_helper(And(Not(formula.param.left), Not(formula.param.right)))
-            else:
-                return Not(self.nnf_helper(formula.param))
-        return
+def uf_test():
+    # Tests several UF formulas, given in a list of hardcoded formulas
+    examples = [
+        Or(And(Atomic("f(a)=f(b)"), Atomic("b=c")), Atomic('g(a,f(a,k(b),f(c)))=d')),  # True
+        Atomic("f(f(a,b),a)=f(c,d)"),  # True
+        And(Atomic("a=b"), And(Or(Or(Not(Atomic("a=b")), Not(Atomic("s=t"))), Atomic("b=c")),
+                               And(Or(Or(Atomic("s=t"), Not(Atomic("t=r"))), Atomic("f(s)=f(t)")),
+                                   And(Or(Or(Not(Atomic("b=c")), Not(Atomic("t=r"))), Atomic("f(s)=f(a)")),
+                                       Or(Not(Atomic("f(s)=f(a)")), Not(Atomic("f(a)=f(c)"))))))),  # True
+        And(Atomic("f(g(x))=g(f(x))"), And(Atomic("f(g(f(y)))=x"), And(Atomic("f(y)=x"),
+                                                                       Not(Atomic("g(f(x))=x"))))),  # False
+        And(Atomic("a=b"), And(Atomic("b=c"), Or(Atomic("d=e"), Or(Atomic("a=c"), Atomic("f=g"))))),  # True
+        And(Atomic("g(a)=c"), And(Or(Not(Atomic("f(g(a))=f(c)")), Atomic("g(a)=d")), Not(Atomic("c=d")))),  # False
+        And(Or(Atomic("g(a)=c"), Atomic("x=y")), And(Or(Not(Atomic("f(g(a))=f(c)")), Atomic("g(a)=d")),
+                                                     And(Not(Atomic("c=d")), Not(Atomic("f(x)=f(y)"))))),  # False
+        And(Not(Atomic("x=y")), Atomic("f(x)=f(y)")),  # True
+        And(Atomic("f(a)=a"), Not(Atomic("f(f(a))=a"))),  # False
+        And(Atomic("f(f(f(a)))=a"), And(Atomic("f(f(f(f(f(a)))))=a"), Not(Atomic("f(a)=a")))),  # False
+        Or(Not(Atomic("x=g(y,z)")), Atomic("f(x)=f(g(y,z))")),  # True
+        And(Atomic("a=b"), And(Atomic("f(c)=c"), Atomic("f(a)=b"))),  # True
+        And(Atomic("f(a,b)=a"), Not(Atomic("f(f(a,b),b)=a"))),  # False
+        And(Not(Atomic("s=x")), And(Atomic("g(f(z))=s"), And(Atomic("g(f(y))=x"), Atomic("y=z")))),  # False
+        And(Or(Atomic("f(x)=f(y)"), Atomic("a=b")), Atomic("x=y")),  # True
+        And(Not(Atomic("f(x)=f(y)")), And(Atomic("y=x"), Atomic("a=b"))),  # False
+        And(Not(Atomic("f(f(x))=f(f(y))")), And(Atomic("f(x)=f(y)"), Atomic("x=y")))  # False
+    ]
 
-    def convert_bool_dnf(self, dnf_bool_op):
-        temp = []
-        dnf = []
-        self.converter(dnf_bool_op, temp, Or)
-        for conj in temp:
-            clause = []
-            self.converter(conj, clause, And)
-            dnf.append(clause)
-        return dnf
+    desired_results = [True, True, True, False, True, False, False, True, False, False, True, True, False, False, True,
+                       False, False]
 
-    def converter(self, formula, output_list, input_type):
-        if type(formula) == input_type:
-            self.converter(formula.left, output_list, input_type)
-            self.converter(formula.right, output_list, input_type)
-        elif type(formula) == Atomic:
-            output_list.append(formula.val)
-        else:
-            output_list.append(formula)
+    for i in range(len(examples)):
+        uf = SMTSolver(examples[i], "uf")
+        print(uf.solvers[0].boolean_abstraction)
+        assert (uf.solve()[0] == desired_results[i])
+
+
+def lp_test():
+    # Tests several LP instances, given in a list of (A,b,c)
+    examples = [
+        (np.array([[1, 1, 2],
+                   [2, 0, 3],
+                   [2, 1, 3]]),
+         np.array([4, 5, 7]),
+         np.array([3, 2, 4])),
+
+        (np.array([[3, 2, 1, 2],
+                   [1, 1, 1, 1],
+                   [4, 3, 3, 4]]),
+         np.array([225, 117, 420]),
+         np.array([19, 13, 12, 17])),
+
+        (np.array([[2, 2, -1],
+                   [3, -2, 1],
+                   [1, -3, 1]]),
+         np.array([10, 10, 10]),
+         np.array([1, 3, -1])),
+
+        (np.array([[1, -1],
+                   [-1, -1],
+                   [2, 1]]),
+         np.array([-1, -3, 4]),
+         np.array([3, 1])),
+
+        (np.array([[1, -1],
+                   [-1, -1],
+                   [2, 1]]),
+         np.array([-1, -3, 2]),
+         np.array([3, 1])),
+
+        (np.array([[1, -1],
+                   [-1, -1],
+                   [2, -1]]),
+         np.array([-1, -3, 2]),
+         np.array([3, 1])),
+
+        (np.array([[-1, 1],
+                   [-2, -2],
+                   [-1, 4]]),
+         np.array([-1, -6, 2]),
+         np.array([1, 3])
+         ),
+
+        (np.array([[1, 2, 3, 1],
+                   [1, 1, 2, 3]]),
+         np.array([5, 3]),
+         np.array([5, 6, 9, 8])),
+
+        (np.array([[2, 3],
+                   [1, 5],
+                   [2, 1],
+                   [4, 1]]),
+         np.array([3, 1, 4, 5]),
+         np.array([2, 1])),
+
+        (np.array([[1, -2],
+                   [1, -1],
+                   [2, -1],
+                   [1, 0],
+                   [2, 1],
+                   [1, 1],
+                   [1, 2],
+                   [0, 1], ]),
+         np.array([1, 2, 6, 5, 16, 12, 21, 10]),
+         np.array([3, 2])),
+
+        # Klee minty
+        (np.array([[1, 0, 0],
+                   [20, 1, 0],
+                   [200, 20, 1]]),
+         np.array([1, 100, 10000]),
+         np.array([100, 10, 1])),
+
+        (np.array([[-2, - 1, 3, 1.2],
+                   [0, - 0, - 0, - 1]]),
+         np.array([-3, 0]),
+         np.array([1, 1, 1, 1]))
+    ]
+
+    for A, b, c in examples:
+        print(f"Solving: max <{c}, x> s.t\n {A}x<={b}")
+        # Print scipy-solver results for comparison
+        res = linprog(c=-c, A_ub=A, b_ub=b)  # Solves min -c problem, need to negate results
+        print(f"Scipy solver result status: {res['message']}\nObjective value {-res['fun']}")
+
+        lp_solver = LPSolver(A, b, c)
+        lp_solver.solve()
+        print("Final assignment:", lp_solver.assignment)
+        print("Objective value:", lp_solver.objective)
+        print("Sol type: ", lp_solver.solution_type)
+        print("####################################")
+
+
+def tq_test():
+    # Tests conversion of a tq_formula to a valid standard form LP
+    formula = And(Or(Atomic("-2xx-1y+3z+1.2t<=-3"), Not(Not(Atomic("1xx+1y+1z-1t<=2.7")))), Imp(Not(Atomic(
+        "0xx-0y-0z-1t<=0")), Atomic("20xx-40y-80z-13t<=2000")))
+    smt = SMTSolver(formula, 'lp')
+    print(smt.solve())
 
 
 if __name__ == '__main__':
-    # formula = Not(Imp(Atomic("-x+y=1"), And(Atomic("z>=-3"), Atomic("-4x+z!=7"))))
-    # formula = Atomic("-2x+2y-z=-3")
-    formula = And(Or(Atomic("q1"), Not(Not(Atomic("q2")))), Imp(Not(Atomic("r1")), Atomic("r2")))
-    smt = SMTSolver(formula)
-    print(smt.process_q_formula(formula))
+    if len(sys.argv) == 1 or sys.argv[1] not in supported_theories:
+        print("USAGE: SMTSolver.py [theory], where theory is one of 'boolean', 'uf', 'lp'")
+    elif sys.argv[1] == 'boolean':
+        SAT_solver_test(hardcoded=True)
+        SAT_solver_test(check_sat=True)
+        SAT_solver_test(check_sat=False)
+    elif sys.argv[1] == 'uf':
+        uf_test()
+    elif sys.argv[1] == 'lp':
+        lp_test()
+        tq_test()

@@ -1,9 +1,5 @@
 import numpy as np
 from scipy.linalg import lu
-from scipy.optimize import linprog
-
-# TODO merge to SMT
-
 
 UNBOUNDED = "Unbounded"
 INFEASIBLE = "Infeasible"
@@ -14,7 +10,7 @@ DANTZIG = "dantzig"
 DEBUG_LP = True
 
 
-# Assumptions - input is hard coded as A,b,c that corresponds to a correct standard form LP instance
+# Assumptions - A,b,c correspond to a correct standard form LP instance
 
 class LPSolver:
     # A class representing an LP solver engine
@@ -22,7 +18,7 @@ class LPSolver:
     # Wraps the RevisedSimplexAlgorithm class, in order to manage two instances,
     # in case an auxiliary problem is needed
 
-    def __init__(self, A, b, c, rule=BLAND, eta_threshold=5, epsilon=0.01):
+    def __init__(self, A, b, c, rule=BLAND, eta_threshold=10, epsilon=0.001):
         self.A = A
         self.b = b
         self.c = c
@@ -44,7 +40,7 @@ class LPSolver:
             self.auxiliary = None
             self.mainLP = RevisedSimplexAlgorithm(A, b, c, rule, eta_threshold, epsilon, False)
 
-    def run(self):
+    def solve(self):
         # Runs the auxiliary problem first (in case it is needed), otherwise runs the main LP
         # If auxiliary problem solution is not bounded with x0=0, original problem is infeasible
         # If not so, use the pivot history of the auxiliary for the main LP as well
@@ -54,20 +50,21 @@ class LPSolver:
             min_idx = np.argmin(b)
             self.auxiliary.perform_pivot(0, min_idx, abs(min(b)), np.array([-1] * n))
             self.auxiliary.aux_pivot_history.append((0, min_idx, abs(min(b)), np.array([-1] * n)))
-            self.auxiliary.run()
+            self.auxiliary.solve()
             if self.auxiliary.solution_type == BOUNDED and self.auxiliary.cur_assignment[0]:
                 self.solution_type = INFEASIBLE
-                return
+                return False, {}
 
             history = self.auxiliary.aux_pivot_history
             for enter_idx, leaving_idx, t, d in history:
                 self.mainLP.perform_pivot(enter_idx, leaving_idx, t, d)
             self.mainLP.eraseX0()
 
-        self.mainLP.run()
+        self.mainLP.solve()
         self.objective = self.mainLP.cur_objective
         self.assignment = self.mainLP.cur_assignment
         self.solution_type = self.mainLP.solution_type
+        return True, {i: val for i, val in enumerate(self.assignment)}
 
 
 class RevisedSimplexAlgorithm:
@@ -108,16 +105,16 @@ class RevisedSimplexAlgorithm:
         self.cur_objective = 0
         self.solution_type = UNDECIDED
 
-    def run(self):
+    def solve(self):
         # Runs the algorithm
         while True:
             self.iterations_counter += 1
             B_inv = self.inv_B_by_etas()
 
-            # For numerical stability reasons - TODO complete from Guy's answers
+            # For numerical stability reasons if B_inv is not accurate - refactor the basis
             if self.iterations_counter == self.NUM_STAB_PERIOD:
                 self.iterations_counter = 0
-                if not np.allclose(self.B @ self.x_b_star, self.b, self.epsilon, self.epsilon):
+                if not np.allclose(B_inv @ self.b, self.x_b_star, self.epsilon, self.epsilon):
                     self.lu_factorization()
 
             # Pick the entering variable
@@ -138,6 +135,7 @@ class RevisedSimplexAlgorithm:
             # If no t found for x*_b - td >= 0
             if leaving_column_index == self.NO_INDEX:
                 self.solution_type = UNBOUNDED
+                self.calc_solution()
                 return
 
             # Performs the pivot according to the indices, non-basic column d, and maximizer t
@@ -290,98 +288,3 @@ class RevisedSimplexAlgorithm:
 
             assert np.allclose(check, l @ u)
             assert np.allclose(self.p @ check, prev_B)
-
-
-def examples():
-    # returns a list of hard coded examples
-    # each example is of the form tuple(A, b,c)
-    return [
-        (np.array([[1, 1, 2],
-                   [2, 0, 3],
-                   [2, 1, 3]]),
-         np.array([4, 5, 7]),
-         np.array([3, 2, 4])),
-
-        (np.array([[3, 2, 1, 2],
-                   [1, 1, 1, 1],
-                   [4, 3, 3, 4]]),
-         np.array([225, 117, 420]),
-         np.array([19, 13, 12, 17])),
-
-        (np.array([[2, 2, -1],
-                   [3, -2, 1],
-                   [1, -3, 1]]),
-         np.array([10, 10, 10]),
-         np.array([1, 3, -1])),
-
-        (np.array([[1, -1],
-                   [-1, -1],
-                   [2, 1]]),
-         np.array([-1, -3, 4]),
-         np.array([3, 1])),
-
-        (np.array([[1, -1],
-                   [-1, -1],
-                   [2, 1]]),
-         np.array([-1, -3, 2]),
-         np.array([3, 1])),
-
-        (np.array([[1, -1],
-                   [-1, -1],
-                   [2, -1]]),
-         np.array([-1, -3, 2]),
-         np.array([3, 1])),
-
-        (np.array([[-1, 1],
-                   [-2, -2],
-                   [-1, 4]]),
-         np.array([-1, -6, 2]),
-         np.array([1, 3])
-         ),
-
-        (np.array([[1, 2, 3, 1],
-                   [1, 1, 2, 3]]),
-         np.array([5, 3]),
-         np.array([5, 6, 9, 8])),
-
-        (np.array([[2, 3],
-                   [1, 5],
-                   [2, 1],
-                   [4, 1]]),
-         np.array([3, 1, 4, 5]),
-         np.array([2, 1])),
-
-        (np.array([[1, -2],
-                   [1, -1],
-                   [2, -1],
-                   [1, 0],
-                   [2, 1],
-                   [1, 1],
-                   [1, 2],
-                   [0, 1], ]),
-         np.array([1, 2, 6, 5, 16, 12, 21, 10]),
-         np.array([3, 2])),
-
-        # Klee minty
-        (np.array([[1, 0, 0],
-                   [20, 1, 0],
-                   [200, 20, 1]]),
-         np.array([1, 100, 10000]),
-         np.array([100, 10, 1])),
-    ]
-
-
-if __name__ == '__main__':
-    for A, b, c in examples():
-
-        print(f"Solving: max <{c}, x> s.t\n {A}x<={b}")
-        # Print scipy-solver results for comparison
-        res = linprog(c=-c, A_ub=A, b_ub=b)  # Solves min -c problem, need to negate results
-        print(f"Scipy solver result status: {res['message']}\nObjective value {-res['fun']}")
-
-        lp_solver = LPSolver(A, b, c, BLAND)
-        lp_solver.run()
-        print("Final assignment:", lp_solver.assignment)
-        print("Objective value:", lp_solver.objective)
-        print("Sol type: ", lp_solver.solution_type)
-        print("####################################")
