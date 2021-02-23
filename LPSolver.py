@@ -114,7 +114,7 @@ class RevisedSimplexAlgorithm:
             # For numerical stability reasons if B_inv is not accurate - refactor the basis
             if self.iterations_counter == self.NUM_STAB_PERIOD:
                 self.iterations_counter = 0
-                if not np.allclose(B_inv @ self.b, self.x_b_star, self.epsilon, self.epsilon):
+                if not np.allclose(np.matmul(B_inv, self.b), self.x_b_star, self.epsilon, self.epsilon):
                     self.lu_factorization()
 
             # Pick the entering variable
@@ -178,7 +178,7 @@ class RevisedSimplexAlgorithm:
         # Calculate the solution of the optimization problem, according to current assignment
 
         self.cur_assignment[self.x_b] = self.x_b_star  # update the current assignment of all vars
-        self.cur_objective = self.c_b @ self.x_b_star  # calc the current objective value
+        self.cur_objective = np.matmul(self.c_b, self.x_b_star)  # calc the current objective value
 
     def inv_B_by_etas(self):
         # Use Eta matrices for inverting B
@@ -186,8 +186,8 @@ class RevisedSimplexAlgorithm:
         B_inv = np.identity(self.m)
         for eta in self.etas[::-1]:
             eta_inv = self.inv_eta(eta)
-            B_inv = B_inv @ eta_inv
-        B_inv = B_inv @ self.p.T  # Permutation matrix is orthogonal
+            B_inv = np.matmul(B_inv, eta_inv)
+        B_inv = np.matmul(B_inv, self.p.T)  # Permutation matrix is orthogonal
         return B_inv
 
     def inv_eta(self, eta):
@@ -215,8 +215,8 @@ class RevisedSimplexAlgorithm:
         # Picks the index of the variable entering the basis
         # according to the rule specified by self.rule
 
-        y = self.c_b @ B_inv
-        z_coeff = self.c_n - y @ self.A_n
+        y = np.matmul(self.c_b, B_inv)
+        z_coeff = self.c_n - np.matmul(y, self.A_n)
 
         # For numerical stability - don't pick a rounded positive
         if np.max(z_coeff) > self.epsilon:
@@ -227,7 +227,7 @@ class RevisedSimplexAlgorithm:
         # Picks the index of the variable leaving the basis
 
         column = self.A_n[:, enter_idx]
-        d = B_inv @ column
+        d = np.matmul(B_inv, column)
 
         # Pick maximal t such that x*_b - td >= 0, if exists
         ts = []
@@ -284,7 +284,7 @@ class RevisedSimplexAlgorithm:
         if DEBUG_LP:
             check = np.identity(self.m)
             for eta in self.etas:
-                check = check @ eta
+                check = np.matmul(check, eta)
 
-            assert np.allclose(check, l @ u)
-            assert np.allclose(self.p @ check, prev_B)
+            assert np.allclose(check, np.matmul(l, u))
+            assert np.allclose(np.matmul(self.p, check), prev_B)
