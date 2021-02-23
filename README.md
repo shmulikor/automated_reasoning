@@ -18,8 +18,11 @@ In addition, the project contains two directories of cnf files:
 SAT_examples
 UNSAT_examples
 
-To run a specific solver, run py SMTSolver.py [theory], where theory is one of {"boolean", "uf", "lp"}
+To run a specific solver, run python SMTSolver.py [theory], where theory is one of {"boolean", "uf", "lp"}
 each of these options runs tests over hardcoded formulas or using the cnf files from the directories.
+
+NOTE: might need to update numpy module in order to compile and run the program.
+This can be done using "pip install -U numpy"
 
 Test functions and hardcoded formulas are written in the SMTSolver.py file.
 
@@ -46,5 +49,8 @@ Test functions and hardcoded formulas are written in the SMTSolver.py file.
 	7. Unless inserted as an argument, objective function is the all-ones vector.
 
 
-
+Additional note:
+    For most parts of development, we wrote the code together.
+    In the beginning Shmuel wrote the basics for the LP solver, and Omri wrote the Implications graph algorithm in 
+    the SAT solver.  
 

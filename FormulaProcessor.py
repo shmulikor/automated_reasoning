@@ -29,7 +29,7 @@ class And(BooleanOperator):
         self.left = left
         self.right = right
         if DEBUG:
-            print(self.name , " : " , self.left.name , " and " , self.right.name)
+            print(self.name, " : ", self.left.name, " and ", self.right.name)
 
     def __repr__(self):
         return "(" + self.left.__repr__() + " and " + self.right.__repr__() + ")"
@@ -43,7 +43,7 @@ class Or(BooleanOperator):
         self.left = left
         self.right = right
         if DEBUG:
-            print(self.name , " : " , self.left.name , " or " , self.right.name)
+            print(self.name, " : ", self.left.name, " or ", self.right.name)
 
     def __repr__(self):
         return "(" + self.left.__repr__() + " or " + self.right.__repr__() + ")"
@@ -73,11 +73,10 @@ class Imp(BooleanOperator):
         self.left = left
         self.right = right
         if DEBUG:
-            print(self.name , " : " , self.left.name , " -> " , self.right.name)
+            print(self.name, " : ", self.left.name, " -> ", self.right.name)
 
     def __repr__(self):
         return "(" + self.left.__repr__() + " -> " + self.right.__repr__() + ")"
-
 
 
 class Equiv(BooleanOperator):
@@ -88,7 +87,7 @@ class Equiv(BooleanOperator):
         self.left = left
         self.right = right
         if DEBUG:
-            print(self.name , " : " , self.left.name , " <=> " , self.right.name)
+            print(self.name, " : ", self.left.name, " <=> ", self.right.name)
 
     def __repr__(self):
         return "(" + self.left.__repr__() + " <=> " + self.right.__repr__() + ")"
@@ -105,10 +104,11 @@ class Atomic(BooleanOperator):
             super().__init__(names[name])
         self.val = name
         if DEBUG:
-            print (self.name, " : ", self.val)
+            print(self.name, " : ", self.val)
 
     def __repr__(self):
         return self.val
+
 
 class FormulaProcessor:
     # A class responsible for processing a general formula
