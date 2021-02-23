@@ -1,12 +1,10 @@
 import sys
 from scipy.optimize import linprog
-from formula_processor import *
-from UF_solver import UFSolver
-from LP_theory_solver import LPSolver
+from FormulaProcessor import *
+from UFSolver import UFSolver
+from LPSolver import LPSolver
 from SATSolver import SATSolver
 import os
-
-# TODO complete assumptions including objective function and other theories
 
 # The main module for the project, which calls all other modules (and tests them)
 # Testing is hardcoded in specified functions
@@ -18,14 +16,13 @@ import os
 # (and without applying Tseitin transformation).
 # BooleanOperator formula is converted using Tseitin transformation
 
-# UF assumption - all atomics are of equality form, inequality is expressed using the Not class
+# UF Assumptions - all atomics are of equality form, inequality is expressed using the Not class
 # Atomic string are syntactically correct and accurate, with all function in their right arity
 
-# LP assumptions:
+# LP Assumptions:
 # Atomics have tq formulas as their strings
 # Input adheres the standard form, with correct dimensions of input objects
-# (all variables are assumed to be >= 0)
-# so no strict inequalities appear
+# (all variables are assumed to be >= 0), so no strict inequalities appear
 # No variable named v in the formula - as it is used for conversion
 # Variables names don't contain numbers (e.g. no x0)
 # All relevant variables are included in all clauses, with the same order
@@ -229,10 +226,10 @@ def lp_test():
     ]
 
     for A, b, c in examples:
-        print(f"Solving: max <{c}, x> s.t\n {A}x<={b}")
+        print("Solving: max <{}, x> s.t\n {}x<={}".format(c, A, b))
         # Print scipy-solver results for comparison
         res = linprog(c=-c, A_ub=A, b_ub=b)  # Solves min -c problem, need to negate results
-        print(f"Scipy solver result status: {res['message']}\nObjective value {-res['fun']}")
+        print("Scipy solver result status: {}\nObjective value {}".format(res['message'],-res['fun']))
 
         lp_solver = LPSolver(A, b, c)
         lp_solver.solve()

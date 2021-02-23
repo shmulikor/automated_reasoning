@@ -1,5 +1,5 @@
 from collections import defaultdict
-from formula_processor import *
+from FormulaProcessor import *
 import networkx as nx
 import matplotlib.pyplot as plt
 from itertools import chain

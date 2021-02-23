@@ -29,10 +29,10 @@ class And(BooleanOperator):
         self.left = left
         self.right = right
         if DEBUG:
-            print(f"{self.name}: {self.left.name} and {self.right.name}")
+            print(self.name , " : " , self.left.name , " and " , self.right.name)
 
     def __repr__(self):
-        return f"({self.left.__repr__()} and {self.right.__repr__()})"
+        return "(" + self.left.__repr__() + " and " + self.right.__repr__() + ")"
 
 
 class Or(BooleanOperator):
@@ -43,10 +43,10 @@ class Or(BooleanOperator):
         self.left = left
         self.right = right
         if DEBUG:
-            print(f"{self.name}: {self.left.name} or {self.right.name}")
+            print(self.name , " : " , self.left.name , " or " , self.right.name)
 
     def __repr__(self):
-        return f"({self.left.__repr__()} or {self.right.__repr__()})"
+        return "(" + self.left.__repr__() + " or " + self.right.__repr__() + ")"
 
 
 class Not(BooleanOperator):
@@ -59,10 +59,10 @@ class Not(BooleanOperator):
             super().__init__(next(counter))
         self.param = param
         if DEBUG:
-            print(f"{self.name}: not {self.param.name}")
+            print(self.name, " : not", self.param.name)
 
     def __repr__(self):
-        return f"not({self.param.__repr__()})"
+        return "(not " + self.param.__repr__() + ")"
 
 
 class Imp(BooleanOperator):
@@ -73,10 +73,11 @@ class Imp(BooleanOperator):
         self.left = left
         self.right = right
         if DEBUG:
-            print(f"{self.name}: {self.left.name} -> {self.right.name}")
+            print(self.name , " : " , self.left.name , " -> " , self.right.name)
 
     def __repr__(self):
-        return f"({self.left.__repr__()} -> {self.right.__repr__()})"
+        return "(" + self.left.__repr__() + " -> " + self.right.__repr__() + ")"
+
 
 
 class Equiv(BooleanOperator):
@@ -87,10 +88,10 @@ class Equiv(BooleanOperator):
         self.left = left
         self.right = right
         if DEBUG:
-            print(f"{self.name}: {self.left.name} <-> {self.right.name}")
+            print(self.name , " : " , self.left.name , " <=> " , self.right.name)
 
     def __repr__(self):
-        return f"({self.left.__repr__()} <=> {self.right.__repr__()})"
+        return "(" + self.left.__repr__() + " <=> " + self.right.__repr__() + ")"
 
 
 class Atomic(BooleanOperator):
@@ -104,7 +105,7 @@ class Atomic(BooleanOperator):
             super().__init__(names[name])
         self.val = name
         if DEBUG:
-            print(f"{self.name}: {self.val}")
+            print (self.name, " : ", self.val)
 
     def __repr__(self):
         return self.val

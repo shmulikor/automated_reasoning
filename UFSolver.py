@@ -28,7 +28,7 @@ class UFVar:
         self.equal = var[EQUAL]
 
     def __repr__(self):
-        return f"{self.left}{'=' if self.equal else '!='}{self.right}"
+        return self.left + ('=' if self.equal else '!=') + self.right
 
 
 class UFSolver:
