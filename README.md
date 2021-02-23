@@ -5,6 +5,7 @@ Shmuel Orenstein
 
 
 # Final Project of course Automated Reasoning of Software 67532
+# Runs with Python 3.8
 
 The project consists of the following modules:
 

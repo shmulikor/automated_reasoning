@@ -6,6 +6,8 @@ from itertools import chain
 
 CONFLICT_NODE = 0
 DRAW_IMP_GRAPH = False
+
+
 # Assumptions - input is either a hard-coded Boolean Operator (first system argument is 0) formula or a cnf file
 
 
@@ -94,18 +96,14 @@ class SATSolver:
         learned_clause, jump_level = self.analyze_conflict()
         self.add_clause(learned_clause)
         self.perform_backjump(jump_level)
+        self.cur_bcp_candidates.append(self.cnf[-1])
         return True
 
     def bcp(self):
         # Performs BCP until saturation, returns True iff formula has a falsified clause
-        self.cur_bcp_candidates = [self.cnf[i] for i, watchers in enumerate(self.watch_literals) if len(watchers) ==
-                                   1]  # In case there's no last decided literal, pick all possible candidates
-        if len(self.splits) > 0:
-            last = self.splits[-1]
-            self.cur_bcp_candidates = self.get_bcp_candidates(last if self.var_assignment[last] else -last)
-            involved_indices = [i for i, clause in enumerate(self.cnf) if last in self.cnf[i] or -last in self.cnf[i]]
-            # Update watch literals for every clause with decided literal
-            self.update_watch_literals(involved_indices)
+        if not len(self.cur_bcp_candidates):  # Refresh self.cur_bcp_candidates when needed
+            self.cur_bcp_candidates = [self.cnf[i] for i, watchers in enumerate(self.watch_literals) if len(watchers) ==
+                                       1]  # In case there's no last decided literal, pick all possible candidates
 
         changed = True
         while changed:
@@ -129,10 +127,8 @@ class SATSolver:
 
     def get_bcp_candidates(self, literal):
         # Returns sublist of all clauses which include the negation of the literal as a watch literal
-        # Add clauses with only one watch literal as well #TODO fix
         # As stated in class, these are only ones relevant for BCP after assignment
         indices = [i for i, watchers in enumerate(self.watch_literals) if -literal in watchers]
-        indices.extend([i for i, watchers in enumerate(self.watch_literals) if len(watchers) == 1])
         return [self.cnf[j] for j in indices]
 
     def bcp_updates(self, clause, chosen_lit):
@@ -162,7 +158,10 @@ class SATSolver:
         self.var_assignment[var] = assign
         self.current_decision_level += 1
         self.decision_levels[var] = self.current_decision_level
+        self.cur_bcp_candidates = self.get_bcp_candidates(var if assign else -var)
+        # Update watch literals for every clause with decided literal
         involved_indices = [i for i, clause in enumerate(self.cnf) if var in self.cnf[i] or -var in self.cnf[i]]
+        self.update_watch_literals(involved_indices)
         for i in involved_indices:
             if all([abs(l) in self.var_assignment.keys() for l in self.cnf[i]]):
                 self.assigned_clauses[i] = True
@@ -351,3 +350,25 @@ def boolean_res(clause1, clause2):
             part2.remove(-lit)
             return list(part1.union(part2))
     return None
+
+
+if __name__ == '__main__':
+
+    check_sat = False
+
+    with open("UNSAT_examples/3color.txt") as formula_file:
+        cnf = []
+        for line in formula_file.readlines():
+            if len(line.strip()) and (not line.strip()[0].isalpha() and not line.strip()[0] == '%'):
+                to_add = [int(num) for num in line.split()]
+                if to_add[-1] == 0:
+                    to_add.pop()
+                if len(to_add):
+                    cnf.append(to_add)
+        solution = SATSolver(cnf)
+        if check_sat:
+            result, assignment = solution.solve()
+            print(assignment)
+            assert result
+        else:
+            assert (not solution.solve()[0])

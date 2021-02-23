@@ -105,7 +105,8 @@ class UFSolver:
             return [], INVALID_JUMP_LEVEL
 
         # Create naive clause from partial assignment and decide jump level
-        t_learn = [-lit if self.sat_solver.var_assignment[lit] else lit for lit in self.sat_solver.var_assignment.keys()]
+        t_learn = [-lit if self.sat_solver.var_assignment[lit] else lit for lit in
+                   self.sat_solver.var_assignment.keys()]
         jump_level = self.sat_solver.clause_jump_level(t_learn)
         return t_learn, jump_level
 
@@ -116,7 +117,8 @@ class UFSolver:
         literals_conjunction = []
         for var in self.sat_solver.var_assignment.keys():
             if var in self.boolean_abstraction:
-                literals_conjunction.append(self.parse_atomic(self.boolean_abstraction[var], self.sat_solver.var_assignment[var]))
+                literals_conjunction.append(
+                    self.parse_atomic(self.boolean_abstraction[var], self.sat_solver.var_assignment[var]))
 
         if potential_assignment is not None:
             for var in potential_assignment.keys():
@@ -297,3 +299,66 @@ class UFSolver:
                     propagation_counter += 1
 
         return propagation_counter > 0
+
+    def partial_uf_explain(self, conflict_clause):
+        # Partially performs uf-explain rule
+        # If the conflict clause has an inequality literal of the form f(x)!=f(y)
+        # Check if x!=y was already assigned
+        # This is based on a logically equivalent inequality version of the congruence rule,
+        # And is used since conflict clauses are originally disjunction of inequalities
+        # Supports multiple arguments functions
+        # Needs to be run until saturation
+        # Written for bonus implementation, function is not currently used
+
+        new_conflict_clause = []
+        for lit in conflict_clause:
+            replaced = False
+
+            # If literal is an inequality
+            if lit < 0 and abs(lit) in self.boolean_abstraction:
+                atomic = self.boolean_abstraction[abs(lit)]
+                left, right = atomic.split('=')
+
+                # If both are calls to the same function
+                if self.is_func_call(left) and self.is_func_call(right) \
+                        and left[:left.index('(')] == right[:right.index('(')]:
+                    left_args = self.parse_function_arguments(left[left.index('(') + 1: -1])
+                    right_args = self.parse_function_arguments(right[right.index('(') + 1: -1])
+
+                    # Arguments lists are of same lengths
+                    if len(left_args) == len(right_args):
+
+                        prev_unequal_args = []
+                        for i in range(len(left_args)):
+                            arg1 = left_args[i]
+                            arg2 = right_args[i]
+
+                            atomic1 = arg1 + "=" + arg2
+                            atomic2 = arg2 + "=" + arg1
+
+                            # Check if arguments were previously assigned as inequality
+                            # In both possible orders
+                            if self.check_prev_assigned_false(atomic1):
+                                var = self.inv_boolean_abstraction[atomic1]
+                                prev_unequal_args.append(-var)
+                            elif self.check_prev_assigned_false(atomic2):
+                                var = self.inv_boolean_abstraction[atomic2]
+                                prev_unequal_args.append(-var)
+
+                        # If all corresponding arguments couple are unequal and decided before -
+                        # explain literal
+                        if len(prev_unequal_args) == len(left_args):
+                            new_conflict_clause.append(prev_unequal_args)
+                            replaced = True
+            if not replaced:
+                new_conflict_clause.append(lit)
+        return new_conflict_clause
+
+    def check_prev_assigned_false(self, atomic):
+        # Checks whether a string exists as a previously false-assigned atomic.
+        if atomic in self.inv_boolean_abstraction.keys():
+            var = self.inv_boolean_abstraction[atomic]
+            return var in self.sat_solver.var_assignment.keys() and not \
+                self.sat_solver.var_assignment[var] and self.sat_solver.decision_levels[var] \
+                < self.sat_solver.current_decision_level
+        return False
