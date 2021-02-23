@@ -241,6 +241,7 @@ def lp_test():
 
 def tq_test():
     # Tests conversion of a tq_formula to a valid standard form LP
+    print("Testing tq formula conversion:")
     formula = And(Or(Atomic("-2xx-1y+3z+1.2t<=-3"), Not(Not(Atomic("1xx+1y+1z-1t<=2.7")))), Imp(Not(Atomic(
         "0xx-0y-0z-1t<=0")), Atomic("20xx-40y-80z-13t<=2000")))
     smt = SMTSolver(formula, 'lp')

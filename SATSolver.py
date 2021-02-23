@@ -350,25 +350,3 @@ def boolean_res(clause1, clause2):
             part2.remove(-lit)
             return list(part1.union(part2))
     return None
-
-
-if __name__ == '__main__':
-
-    check_sat = False
-
-    with open("UNSAT_examples/3color.txt") as formula_file:
-        cnf = []
-        for line in formula_file.readlines():
-            if len(line.strip()) and (not line.strip()[0].isalpha() and not line.strip()[0] == '%'):
-                to_add = [int(num) for num in line.split()]
-                if to_add[-1] == 0:
-                    to_add.pop()
-                if len(to_add):
-                    cnf.append(to_add)
-        solution = SATSolver(cnf)
-        if check_sat:
-            result, assignment = solution.solve()
-            print(assignment)
-            assert result
-        else:
-            assert (not solution.solve()[0])

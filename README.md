@@ -50,8 +50,10 @@ Test functions and hardcoded formulas are written in the SMTSolver.py file.
 	7. Unless inserted as an argument, objective function is the all-ones vector.
 
 
-Additional note:
+Additional notes:
     For most parts of development, we wrote the code together.
     In the beginning Shmuel wrote the basics for the LP solver, and Omri wrote the Implications graph algorithm in 
-    the SAT solver.  
+    the SAT solver. 
+
+    We implemented a partial uf-explain rule for the bonus, it is not currently used and written only for further work 
 
