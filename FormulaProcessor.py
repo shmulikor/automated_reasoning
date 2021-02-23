@@ -17,14 +17,14 @@ DEBUG = False
 
 class BooleanOperator:
     # General class representing a boolean operator
-    def __init__(self, name: int):
+    def __init__(self, name):
         self.name = name
 
 
 class And(BooleanOperator):
     # A class representing the And boolean operator
 
-    def __init__(self, left: BooleanOperator, right: BooleanOperator):
+    def __init__(self, left, right):
         super().__init__(next(counter))
         self.left = left
         self.right = right
@@ -38,7 +38,7 @@ class And(BooleanOperator):
 class Or(BooleanOperator):
     # A class representing the Or boolean operator
 
-    def __init__(self, left: BooleanOperator, right: BooleanOperator):
+    def __init__(self, left, right):
         super().__init__(next(counter))
         self.left = left
         self.right = right
@@ -52,7 +52,7 @@ class Or(BooleanOperator):
 class Not(BooleanOperator):
     # A class representing the Not boolean operator
 
-    def __init__(self, param: BooleanOperator):
+    def __init__(self, param):
         if type(param) == Atomic:
             super().__init__(-param.name)
         else:
@@ -68,7 +68,7 @@ class Not(BooleanOperator):
 class Imp(BooleanOperator):
     # A class representing the Implication boolean operator
 
-    def __init__(self, left: BooleanOperator, right: BooleanOperator):
+    def __init__(self, left, right):
         super().__init__(next(counter))
         self.left = left
         self.right = right
@@ -83,7 +83,7 @@ class Imp(BooleanOperator):
 class Equiv(BooleanOperator):
     # A class representing the Equivalence boolean operator
 
-    def __init__(self, left: BooleanOperator, right: BooleanOperator):
+    def __init__(self, left, right):
         super().__init__(next(counter))
         self.left = left
         self.right = right
@@ -97,7 +97,7 @@ class Equiv(BooleanOperator):
 class Atomic(BooleanOperator):
     # A class representing an Atomic proposition
 
-    def __init__(self, name: str):
+    def __init__(self, name):
         if name not in names.keys():
             names[name] = next(counter)
             super().__init__(names[name])

@@ -37,7 +37,7 @@ class UFSolver:
     # input is syntactically valid
     # Atomic variables are string representing equality, of form "left=right"
 
-    def __init__(self, raw_formula: BooleanOperator):
+    def __init__(self, raw_formula):
         self.boolean_abstraction = {}  # keys are numbers of boolean variables, values are relevant atomics
         self.inv_boolean_abstraction = {}  # inverse of previous dictionary
         self.boolean_formula = []  # The boolean version of the formula
