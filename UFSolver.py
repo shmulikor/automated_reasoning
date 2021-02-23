@@ -22,7 +22,7 @@ abstractor = abstractions_generator()
 
 class UFVar:
     # A class representing a variable in UF theory
-    def __init__(self, var: tuple):
+    def __init__(self, var):
         self.left = var[LEFT]
         self.right = var[RIGHT]
         self.equal = var[EQUAL]
